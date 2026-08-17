@@ -41,18 +41,18 @@ private:
   const DeclKind Kind;
 
 protected:
-  Decl *EnclosingDecL;
+  Decl *EnclosingDecl;
   SMLoc Loc;
   StringRef Name;
 
 public:
-  Decl(DeclKind Kind, Decl *EnclosingDecL, SMLoc Loc, StringRef Name)
-      : Kind(Kind), EnclosingDecL(EnclosingDecL), Loc(Loc), Name(Name) {}
+  Decl(DeclKind Kind, Decl *EnclosingDecl, SMLoc Loc, StringRef Name)
+      : Kind(Kind), EnclosingDecl(EnclosingDecl), Loc(Loc), Name(Name) {}
 
   DeclKind getKind() const { return Kind; }
   SMLoc getLocation() { return Loc; }
   StringRef getName() { return Name; }
-  Decl *getEnclosingDecl() { return EnclosingDecL; }
+  Decl *getEnclosingDecl() { return EnclosingDecl; }
 };
 
 class ModuleDeclaration : public Decl {
@@ -60,12 +60,12 @@ class ModuleDeclaration : public Decl {
   StmtList Stmts;
 
 public:
-  ModuleDeclaration(Decl *EnclosingDecL, SMLoc Loc, StringRef Name)
-      : Decl(DK_Module, EnclosingDecL, Loc, Name) {}
+  ModuleDeclaration(Decl *EnclosingDecl, SMLoc Loc, StringRef Name)
+      : Decl(DK_Module, EnclosingDecl, Loc, Name) {}
 
-  ModuleDeclaration(Decl *EnclosingDecL, SMLoc Loc, StringRef Name,
+  ModuleDeclaration(Decl *EnclosingDecl, SMLoc Loc, StringRef Name,
                     DeclList &Decls, StmtList &Stmts)
-      : Decl(DK_Module, EnclosingDecL, Loc, Name), Decls(Decls), Stmts(Stmts) {}
+      : Decl(DK_Module, EnclosingDecl, Loc, Name), Decls(Decls), Stmts(Stmts) {}
 
   const DeclList &getDecls() { return Decls; }
   void setDecls(DeclList &D) { Decls = D; }
@@ -79,8 +79,8 @@ class ConstantDeclaration : public Decl {
   Expr *E;
 
 public:
-  ConstantDeclaration(Decl *EnclosingDecL, SMLoc Loc, StringRef Name, Expr *E)
-      : Decl(DK_Const, EnclosingDecL, Loc, Name), E(E) {}
+  ConstantDeclaration(Decl *EnclosingDecl, SMLoc Loc, StringRef Name, Expr *E)
+      : Decl(DK_Const, EnclosingDecl, Loc, Name), E(E) {}
 
   Expr *getExpr() { return E; }
 
@@ -89,8 +89,8 @@ public:
 
 class TypeDeclaration : public Decl {
 public:
-  TypeDeclaration(Decl *EnclosingDecL, SMLoc Loc, StringRef Name)
-      : Decl(DK_Type, EnclosingDecL, Loc, Name) {}
+  TypeDeclaration(Decl *EnclosingDecl, SMLoc Loc, StringRef Name)
+      : Decl(DK_Type, EnclosingDecl, Loc, Name) {}
 
   static bool classof(const Decl *D) { return D->getKind() == DK_Type; }
 };
@@ -99,9 +99,9 @@ class VariableDeclaration : public Decl {
   TypeDeclaration *Ty;
 
 public:
-  VariableDeclaration(Decl *EnclosingDecL, SMLoc Loc, StringRef Name,
+  VariableDeclaration(Decl *EnclosingDecl, SMLoc Loc, StringRef Name,
                       TypeDeclaration *Ty)
-      : Decl(DK_Var, EnclosingDecL, Loc, Name), Ty(Ty) {}
+      : Decl(DK_Var, EnclosingDecl, Loc, Name), Ty(Ty) {}
 
   TypeDeclaration *getType() { return Ty; }
 
@@ -113,9 +113,9 @@ class FormalParameterDeclaration : public Decl {
   bool IsVar;
 
 public:
-  FormalParameterDeclaration(Decl *EnclosingDecL, SMLoc Loc, StringRef Name,
+  FormalParameterDeclaration(Decl *EnclosingDecl, SMLoc Loc, StringRef Name,
                              TypeDeclaration *Ty, bool IsVar)
-      : Decl(DK_Param, EnclosingDecL, Loc, Name), Ty(Ty), IsVar(IsVar) {}
+      : Decl(DK_Param, EnclosingDecl, Loc, Name), Ty(Ty), IsVar(IsVar) {}
 
   TypeDeclaration *getType() { return Ty; }
   bool isVar() { return IsVar; }
@@ -130,13 +130,13 @@ class ProcedureDeclaration : public Decl {
   StmtList Stmts;
 
 public:
-  ProcedureDeclaration(Decl *EnclosingDecL, SMLoc Loc, StringRef Name)
-      : Decl(DK_Proc, EnclosingDecL, Loc, Name) {}
+  ProcedureDeclaration(Decl *EnclosingDecl, SMLoc Loc, StringRef Name)
+      : Decl(DK_Proc, EnclosingDecl, Loc, Name) {}
 
-  ProcedureDeclaration(Decl *EnclosingDecL, SMLoc Loc, StringRef Name,
+  ProcedureDeclaration(Decl *EnclosingDecl, SMLoc Loc, StringRef Name,
                        FormalParamList &Params, TypeDeclaration *RetType,
                        DeclList &Decls, StmtList &Stmts)
-      : Decl(DK_Proc, EnclosingDecL, Loc, Name), Params(Params),
+      : Decl(DK_Proc, EnclosingDecl, Loc, Name), Params(Params),
         RetType(RetType), Decls(Decls), Stmts(Stmts) {}
 
   const FormalParamList &getFormalParams() { return Params; }
