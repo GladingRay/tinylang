@@ -1,7 +1,14 @@
 #include "tinylang/Sema/Sema.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace tinylang;
+
+static StringRef getOperatorSpelling(tok::TokenKind Kind) {
+  if (const char *P = tok::getPunctuatorSpelling(Kind))
+    return P;
+  return tok::getKeywordSpelling(Kind);
+}
 
 void Sema::enterScope(Decl *D) {
   CurrentScope = new Scope(CurrentScope);
@@ -46,10 +53,12 @@ void Sema::checkFormalAndActualParameters(SMLoc Loc,
   for (auto I = Formals.begin(), E = Formals.end(); I != E; ++I, ++A) {
     FormalParameterDeclaration *F = *I;
     Expr *Arg = *A;
+    if (!Arg)
+      continue;
     if (F->getType() != Arg->getType())
       Diags.report(
           Loc, diag::err_type_of_formal_and_actual_parameter_not_compatible);
-    if (F->isVar() && isa<VariableAccess>(Arg))
+    if (F->isVar() && !isa<VariableAccess>(Arg))
       Diags.report(Loc, diag::err_var_parameter_requires_var);
   }
 }
@@ -105,6 +114,8 @@ void Sema::actOnConstantDeclaration(DeclList &Decls, SMLoc Loc, StringRef Name,
 
 void Sema::actOnVariableDeclaration(DeclList &Decls, IdentList &Ids, Decl *D) {
   assert(CurrentScope && "CurrentScope not set");
+  if (!D)
+    return;
   if (TypeDeclaration *Ty = dyn_cast<TypeDeclaration>(D)) {
     for (auto &[Loc, Name] : Ids) {
       auto *Decl = new VariableDeclaration(CurrentDecl, Loc, Name, Ty);
@@ -123,6 +134,8 @@ void Sema::actOnFormalParameterDeclaration(FormalParamList &Params,
                                            IdentList &Ids, Decl *D,
                                            bool IsVar) {
   assert(CurrentScope && "CurrentScope not set");
+  if (!D)
+    return;
   if (TypeDeclaration *Ty = dyn_cast<TypeDeclaration>(D)) {
     for (auto &[Loc, Name] : Ids) {
       FormalParameterDeclaration *Decl =
@@ -147,11 +160,12 @@ ProcedureDeclaration *Sema::actOnProcedureDeclaration(SMLoc Loc,
 }
 
 void Sema::actOnProcedureHeading(ProcedureDeclaration *ProcDecl,
-                                 FormalParamList &Params, Decl *RetType) {
+                                 FormalParamList &Params, Decl *RetType,
+                                 SMLoc RetTypeLoc) {
   ProcDecl->setFormalParams(Params);
   auto *RetTypeDecl = dyn_cast_or_null<TypeDeclaration>(RetType);
   if (!RetTypeDecl && RetType)
-    Diags.report(RetType->getLocation(), diag::err_returntype_must_be_type);
+    Diags.report(RetTypeLoc, diag::err_returntype_must_be_type);
   else
     ProcDecl->setRetType(RetTypeDecl);
 }
@@ -170,10 +184,12 @@ void Sema::actOnProcedureDeclaration(ProcedureDeclaration *ProcDecl, SMLoc Loc,
 }
 
 void Sema::actOnAssignment(StmtList &Stmts, SMLoc Loc, Decl *D, Expr *E) {
+  if (!D || !E)
+    return;
   if (auto Var = dyn_cast<VariableDeclaration>(D)) {
     if (Var->getType() != E->getType()) {
       Diags.report(Loc, diag::err_types_for_operator_not_compatible,
-                   tok::getPunctuatorSpelling(tok::colonequal));
+                   getOperatorSpelling(tok::colonequal));
     }
     Stmts.push_back(new AssignmentStatement(Var, E));
   } else if (D) {
@@ -183,6 +199,8 @@ void Sema::actOnAssignment(StmtList &Stmts, SMLoc Loc, Decl *D, Expr *E) {
 
 void Sema::actOnProcCall(StmtList &Stmts, SMLoc Loc, Decl *D,
                          ExprList &Params) {
+  if (!D)
+    return;
   if (auto Proc = dyn_cast<ProcedureDeclaration>(D)) {
     checkFormalAndActualParameters(Loc, Proc->getFormalParams(), Params);
     if (Proc->getRetType())
@@ -238,7 +256,7 @@ Expr *Sema::actOnExpression(Expr *Left, Expr *Right, const OperatorInfo &Op) {
 
   if (Left->getType() != Right->getType()) {
     Diags.report(Op.getLocation(), diag::err_types_for_operator_not_compatible,
-                 tok::getPunctuatorSpelling(Op.getKind()));
+                 getOperatorSpelling(Op.getKind()));
   }
   bool IsConst = Left->isConst() && Right->isConst();
   return new InfixExpression(Left, Right, Op, BooleanType, IsConst);
@@ -254,7 +272,7 @@ Expr *Sema::actOnSimpleExpression(Expr *Left, Expr *Right,
 
   if (Left->getType() != Right->getType()) {
     Diags.report(Op.getLocation(), diag::err_types_for_operator_not_compatible,
-                 tok::getPunctuatorSpelling(Op.getKind()));
+                 getOperatorSpelling(Op.getKind()));
   }
   TypeDeclaration *Ty = Left->getType();
   bool IsConst = Left->isConst() && Right->isConst();
@@ -276,7 +294,7 @@ Expr *Sema::actOnTerm(Expr *Left, Expr *Right, const OperatorInfo &Op) {
   if (Left->getType() != Right->getType() ||
       !isOperatorForType(Op.getKind(), Left->getType())) {
     Diags.report(Op.getLocation(), diag::err_types_for_operator_not_compatible,
-                 tok::getPunctuatorSpelling(Op.getKind()));
+                 getOperatorSpelling(Op.getKind()));
   }
   TypeDeclaration *Ty = Left->getType();
   bool IsConst = Left->isConst() && Right->isConst();
@@ -294,7 +312,7 @@ Expr *Sema::actOnPrefixExpression(Expr *E, const OperatorInfo &Op) {
 
   if (!isOperatorForType(Op.getKind(), E->getType())) {
     Diags.report(Op.getLocation(), diag::err_types_for_operator_not_compatible,
-                 tok::getPunctuatorSpelling(Op.getKind()));
+                 getOperatorSpelling(Op.getKind()));
   }
 
   if (E->isConst() && Op.getKind() == tok::kw_NOT) {
@@ -326,6 +344,11 @@ Expr *Sema::actOnIntegerLiteral(SMLoc Loc, StringRef Literal) {
     Literal = Literal.drop_back();
     Radix = 16;
   }
+  // The lexer already diagnosed hex digits in decimal literals.  Do not feed
+  // an invalid literal to APInt, which would abort the compiler.
+  if (Radix == 10 &&
+      !llvm::all_of(Literal, [](char C) { return C >= '0' && C <= '9'; }))
+    Literal = "0";
   llvm::APInt Value(64, Literal, Radix);
   return new IntegerLiteral(Loc, llvm::APSInt(Value, false), IntegerType);
 }
@@ -348,17 +371,16 @@ Expr *Sema::actOnVariable(Decl *D) {
   return nullptr;
 }
 
-Expr *Sema::actOnFunctionCall(Decl *D, ExprList &Params) {
+Expr *Sema::actOnFunctionCall(SMLoc Loc, Decl *D, ExprList &Params) {
   if (!D)
     return nullptr;
   if (auto *P = dyn_cast<ProcedureDeclaration>(D)) {
-    checkFormalAndActualParameters(D->getLocation(), P->getFormalParams(),
-                                   Params);
+    checkFormalAndActualParameters(Loc, P->getFormalParams(), Params);
     if (!P->getRetType())
-      Diags.report(D->getLocation(), diag::err_function_call_on_nonfunction);
+      Diags.report(Loc, diag::err_function_call_on_nonfunction);
     return new FunctionCallExpr(P, Params);
   }
-  Diags.report(D->getLocation(), diag::err_function_call_on_nonfunction);
+  Diags.report(Loc, diag::err_function_call_on_nonfunction);
   return nullptr;
 }
 

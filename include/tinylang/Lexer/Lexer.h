@@ -28,7 +28,6 @@ public:
 using namespace llvm;
 
 class Lexer {
-  SourceMgr &SrcMgr;
   DiagnosticsEngine &Diags;
 
   const char *CurPtr;
@@ -42,7 +41,7 @@ class Lexer {
 
 public:
   Lexer(SourceMgr &SrcMgr, DiagnosticsEngine &Diags)
-      : SrcMgr(SrcMgr), Diags(Diags) {
+      : Diags(Diags) {
     CurBuffer = SrcMgr.getMainFileID();
     CurBuf = SrcMgr.getMemoryBuffer(CurBuffer)->getBuffer();
     CurPtr = CurBuf.begin();

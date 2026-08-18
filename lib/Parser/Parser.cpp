@@ -167,12 +167,13 @@ bool Parser::parseProcedureDeclaration(DeclList &ParentDecls) {
   EnterDeclScope S(Actions, D);
   FormalParamList Params;
   Decl *RetType = nullptr;
+  SMLoc RetTypeLoc;
   advance();
   if (Tok.is(tok::l_paren)) {
-    if (parseFormalParameters(Params, RetType))
+    if (parseFormalParameters(Params, RetType, RetTypeLoc))
       return _errorhandler();
   }
-  Actions.actOnProcedureHeading(D, Params, RetType);
+  Actions.actOnProcedureHeading(D, Params, RetType, RetTypeLoc);
   if (expect(tok::semi))
     return _errorhandler();
   DeclList Decls;
@@ -190,7 +191,8 @@ bool Parser::parseProcedureDeclaration(DeclList &ParentDecls) {
   return false;
 }
 
-bool Parser::parseFormalParameters(FormalParamList &Params, Decl *&RetType) {
+bool Parser::parseFormalParameters(FormalParamList &Params, Decl *&RetType,
+                                   SMLoc &RetTypeLoc) {
   auto _errorhandler = [this] { return skipUntil(tok::semi); };
   if (consume(tok::l_paren))
     return _errorhandler();
@@ -202,6 +204,7 @@ bool Parser::parseFormalParameters(FormalParamList &Params, Decl *&RetType) {
     return _errorhandler();
   if (Tok.is(tok::colon)) {
     advance();
+    RetTypeLoc = Tok.getLocation();
     if (parseQualident(RetType))
       return _errorhandler();
   }
@@ -548,6 +551,7 @@ bool Parser::parseFactor(Expr *&E) {
   } else if (Tok.is(tok::identifier)) {
     Decl *D;
     ExprList Exprs;
+    SMLoc Loc = Tok.getLocation();
     if (parseQualident(D))
       return _errorhandler();
     if (Tok.is(tok::l_paren)) {
@@ -559,7 +563,7 @@ bool Parser::parseFactor(Expr *&E) {
       }
       if (expect(tok::r_paren))
         return _errorhandler();
-      E = Actions.actOnFunctionCall(D, Exprs);
+      E = Actions.actOnFunctionCall(Loc, D, Exprs);
       advance();
     } else if (Tok.isOneOf(tok::hash, tok::r_paren, tok::star, tok::plus,
                            tok::comma, tok::minus, tok::slash, tok::semi,
@@ -602,7 +606,7 @@ bool Parser::parseQualident(Decl *&D) {
     return _errorhandler();
   D = Actions.actOnQualIdentPart(D, Tok.getLocation(), Tok.getIdentifier());
   advance();
-  while (Tok.is(tok::period) && (isa<ModuleDeclaration>(D))) {
+  while (Tok.is(tok::period) && D && isa<ModuleDeclaration>(D)) {
     advance();
     if (expect(tok::identifier))
       return _errorhandler();

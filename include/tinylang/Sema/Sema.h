@@ -47,7 +47,8 @@ public:
                                        Decl *D, bool IsVar);
   ProcedureDeclaration *actOnProcedureDeclaration(SMLoc Loc, StringRef Name);
   void actOnProcedureHeading(ProcedureDeclaration *ProcDecl,
-                             FormalParamList &Params, Decl *RetType);
+                             FormalParamList &Params, Decl *RetType,
+                             SMLoc RetTypeLoc);
   void actOnProcedureDeclaration(ProcedureDeclaration *ProcDecl, SMLoc Loc,
                                  StringRef Name, DeclList &Decls,
                                  StmtList &Stmts);
@@ -65,7 +66,7 @@ public:
   Expr *actOnPrefixExpression(Expr *E, const OperatorInfo &Op);
   Expr *actOnIntegerLiteral(SMLoc Loc, StringRef Literal);
   Expr *actOnVariable(Decl *D);
-  Expr *actOnFunctionCall(Decl *D, ExprList &Params);
+  Expr *actOnFunctionCall(SMLoc Loc, Decl *D, ExprList &Params);
   Decl *actOnQualIdentPart(Decl *Prev, SMLoc Loc, StringRef Name);
 };
 

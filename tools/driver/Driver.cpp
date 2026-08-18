@@ -12,6 +12,7 @@ int main(int argc_, const char **argv_) {
 
   llvm::outs() << "Tinylang " << tinylang::getTinylangVersion() << "\n";
 
+  bool HadErrors = false;
   for (const char *F : argv) {
     llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> FileOrErr =
         llvm::MemoryBuffer::getFile(F);
@@ -32,5 +33,8 @@ int main(int argc_, const char **argv_) {
     auto TheSema = Sema(Diags);
     auto TheParser = Parser(TheLexer, TheSema);
     TheParser.parse();
+    if (Diags.numErrors() > 0)
+      HadErrors = true;
   }
+  return HadErrors ? 1 : 0;
 }

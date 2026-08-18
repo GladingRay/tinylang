@@ -30,6 +30,6 @@ const char *tok::getKeywordSpelling(TokenKind Kind) {
   switch (Kind) {
 #define KEYWORD(ID, FLAG) case kw_ ## ID: return #ID;
 #include "tinylang/Basic/TokenKinds.def"
-    default: return ""; break;
+    default: return nullptr;
   }
 }
