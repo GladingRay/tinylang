@@ -24,18 +24,6 @@ done
 
 ## Known issues
 
-- `err_hex_digit_in_decimal` in an expression context crashes the compiler:
-  after the lexer reports the bad literal, `Sema::actOnIntegerLiteral` still
-  constructs an `llvm::APInt` from it, which aborts on the invalid digit
-  (LLVM assertion in `APInt.cpp:fromString`). Putting the literal in a type
-  position crashes differently: the parser recovers with a null declaration
-  and `Sema::actOnVariableDeclaration` asserts in `dyn_cast`.
-  `DiagLexerHexDigit.mod` avoids both crashes by placing the literal right
-  after `MODULE`, where it is only lexed, never parsed as an expression.
-- The VAR parameter check in `Sema::checkFormalAndActualParameters` is
-  inverted: it reports `err_var_parameter_requires_var` when the argument
-  *is* a variable, instead of when it is not. `DiagVarParamRequiresVar.mod`
-  documents the current (buggy) behavior.
-- The driver always exits with status 0, even when errors are reported.
-- The `WHILE` diagnostic text says "expression of IF statement" (copy-paste
-  in `Diagnostic.def`); the diagnostic kind is still correct.
+- The driver exits with status 1 if at least one error was reported.
+- After a syntax error, error recovery may emit additional cascading
+  diagnostics; the expected diagnostics are listed at the top of each file.

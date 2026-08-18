@@ -1,8 +1,8 @@
 (* Expected diagnostic:
    err_var_parameter_requires_var
-   NOTE: the intended semantics is that only non-variable arguments are
-   rejected.  The current Sema check in Sema.cpp is inverted, so passing
-   a variable currently triggers the error (and a literal does not). *)
+   A VAR formal parameter requires a variable as argument.
+   The first call (with variables) is valid and produces no error;
+   the second call passes a literal, which is rejected. *)
 MODULE Gcd;
 VAR x : INTEGER;
 
@@ -15,5 +15,6 @@ BEGIN
 END Swap;
 
 BEGIN
-  Swap(x, x)
+  Swap(x, x);
+  Swap(1, x)
 END Gcd.
