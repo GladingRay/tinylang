@@ -29,3 +29,5 @@ target_link_libraries(tinylang
   tinylangParser
   tinylangSema
   )
+
+add_subdirectory(astdump)
