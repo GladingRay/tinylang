@@ -17,6 +17,6 @@ public:
   static CodeGenerator *create(llvm::LLVMContext &Ctx, llvm::TargetMachine *TM);
 
   std::unique_ptr<llvm::Module> run(ModuleDeclaration *Mod,
-                                    std::string FileName);
+                                    const std::string &FileName);
 };
 } // namespace tinylang
