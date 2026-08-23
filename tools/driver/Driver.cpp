@@ -180,6 +180,7 @@ int main(int Argc, const char **Argv) {
   auto TheSema = Sema(Diags);
   auto TheParser = Parser(TheLexer, TheSema);
   auto *Mod = TheParser.parse();
+  bool HadErrors = Diags.numErrors() > 0;
   if (Mod && !Diags.numErrors()) {
     llvm::LLVMContext Ctx;
     if (CodeGenerator *CG = CodeGenerator::create(Ctx, TM)) {
@@ -191,4 +192,5 @@ int main(int Argc, const char **Argv) {
       delete CG;
     }
   }
+  return HadErrors ? 1 : 0;
 }

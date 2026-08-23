@@ -186,15 +186,20 @@ void Sema::actOnProcedureDeclaration(ProcedureDeclaration *ProcDecl, SMLoc Loc,
 void Sema::actOnAssignment(StmtList &Stmts, SMLoc Loc, Decl *D, Expr *E) {
   if (!D || !E)
     return;
-  if (auto Var = dyn_cast<VariableDeclaration>(D)) {
-    if (Var->getType() != E->getType()) {
-      Diags.report(Loc, diag::err_types_for_operator_not_compatible,
-                   getOperatorSpelling(tok::colonequal));
-    }
-    Stmts.push_back(new AssignmentStatement(Var, E));
-  } else if (D) {
+  TypeDeclaration *Ty = nullptr;
+  if (auto *Var = dyn_cast<VariableDeclaration>(D))
+    Ty = Var->getType();
+  else if (auto *FP = dyn_cast<FormalParameterDeclaration>(D))
+    Ty = FP->getType();
+  else {
     // TODO Emit error
+    return;
   }
+  if (Ty != E->getType()) {
+    Diags.report(Loc, diag::err_types_for_operator_not_compatible,
+                 getOperatorSpelling(tok::colonequal));
+  }
+  Stmts.push_back(new AssignmentStatement(D, E));
 }
 
 void Sema::actOnProcCall(StmtList &Stmts, SMLoc Loc, Decl *D,
