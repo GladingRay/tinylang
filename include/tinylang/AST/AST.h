@@ -270,7 +270,7 @@ public:
   ConstantAccess(ConstantDeclaration *Const)
       : Expr(EK_Const, Const->getExpr()->getType(), true), Const(Const) {}
 
-  ConstantDeclaration *geDecl() { return Const; }
+  ConstantDeclaration *getDecl() { return Const; }
 
   static bool classof(const Expr *E) { return E->getKind() == EK_Const; }
 };
@@ -283,7 +283,7 @@ public:
   FunctionCallExpr(ProcedureDeclaration *Proc, ExprList Params)
       : Expr(EK_Func, Proc->getRetType(), false), Proc(Proc), Params(Params) {}
 
-  ProcedureDeclaration *geDecl() { return Proc; }
+  ProcedureDeclaration *getDecl() { return Proc; }
   const ExprList &getParams() { return Params; }
 
   static bool classof(const Expr *E) { return E->getKind() == EK_Func; }

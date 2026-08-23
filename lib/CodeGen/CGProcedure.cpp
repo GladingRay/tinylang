@@ -2,6 +2,7 @@
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/ModRef.h"
 
 using namespace tinylang;
 
@@ -27,7 +28,7 @@ llvm::Value *CGProcedure::readLocalVariable(llvm::BasicBlock *BB, Decl *Decl) {
 }
 
 llvm::Value *
-CGProcedure::readLocalVariableRecursive(llvm::BasicBlock *BB.Decl *Decl) {
+CGProcedure::readLocalVariableRecursive(llvm::BasicBlock *BB, Decl *Decl) {
   llvm::Value *Val = nullptr;
   if (!CurrentDef[BB].Sealed) {
     // Add incomplete phi for variable.
@@ -51,7 +52,16 @@ CGProcedure::readLocalVariableRecursive(llvm::BasicBlock *BB.Decl *Decl) {
 llvm::PHINode *CGProcedure::addEmptyPhi(llvm::BasicBlock *BB, Decl *Decl) {
   return BB->empty()
              ? llvm::PHINode::Create(mapType(Decl), 0, "", BB)
-             : llvm::PHINode::Create(mapType(Decl), 0, "", &BB->front());
+             : llvm::PHINode::Create(mapType(Decl), 0, "",
+                                     BB->getFirstInsertionPt());
+}
+
+llvm::Value *CGProcedure::addPhiOperands(llvm::BasicBlock *BB, Decl *D,
+                                         llvm::PHINode *Phi) {
+  for (auto *PredBB : predecessors(BB)) {
+    Phi->addIncoming(readLocalVariable(PredBB, D), PredBB);
+  }
+  return optimizePhi(Phi);
 }
 
 llvm::Value *CGProcedure::optimizePhi(llvm::PHINode *Phi) {
@@ -165,7 +175,7 @@ llvm::Function *CGProcedure::createFunction(ProcedureDeclaration *Proc,
       llvm::TypeSize Sz = CGM.getModule()->getDataLayout().getTypeStoreSize(
           CGM.convertType(FP->getType()));
       Attr.addDereferenceableAttr(Sz);
-      Attr.addAttribute(llvm::Attribute::NoCapture);
+      Attr.addCapturesAttr(llvm::CaptureInfo::none());
       Arg.addAttrs(Attr);
     }
     Arg.setName(FP->getName());

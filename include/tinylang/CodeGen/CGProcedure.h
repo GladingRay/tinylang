@@ -23,7 +23,7 @@ class CGProcedure {
 
   struct BasicBlockDef {
 
-    llvm::DenseMap<Decl *, llvm::TrackingVH<llvm::Value>> defs;
+    llvm::DenseMap<Decl *, llvm::TrackingVH<llvm::Value>> Defs;
 
     llvm::DenseMap<llvm::PHINode *, Decl *> IncompletePhis;
 
@@ -68,7 +68,7 @@ protected:
     Builder.SetInsertPoint(Curr);
   }
 
-  llvm::Value *emitinfixExpr(InfixExpression *E);
+  llvm::Value *emitInfixExpr(InfixExpression *E);
 
   llvm::Value *emitPrefixExpr(PrefixExpression *E);
 
@@ -87,7 +87,7 @@ protected:
   void emit(const StmtList &Stmts);
 
 public:
-  CGProcedure(CGModule *CGM)
+  CGProcedure(CGModule &CGM)
       : CGM(CGM), Builder(CGM.getLLVMCtx()), Curr(nullptr) {}
 
   void run(ProcedureDeclaration *Proc);

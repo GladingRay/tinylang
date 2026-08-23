@@ -18,7 +18,7 @@ public:
   llvm::Constant *Int32Zero;
 
 public:
-  CGModule(llvm::Module *M) : M(M) { initialize(); }
+  CGModule(llvm::Module *M) : M(M), Mod(nullptr) { initialize(); }
 
   void initialize();
 

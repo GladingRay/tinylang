@@ -20,7 +20,7 @@ CodeGenerator::run(ModuleDeclaration *Mod,
                    std::string FileName) {
   std::unique_ptr<llvm::Module> M =
       std::make_unique<llvm::Module>(FileName, Ctx);
-  M->setTargetTriple(TM->getTargetTriple().getTriple());
+  M->setTargetTriple(TM->getTargetTriple());
   M->setDataLayout(TM->createDataLayout());
   CGModule CGM(M.get());
   CGM.run(Mod);

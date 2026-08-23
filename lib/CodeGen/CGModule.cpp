@@ -36,6 +36,7 @@ std::string CGModule::mangleName(Decl *D) {
 llvm::GlobalObject *CGModule::getGlobal(Decl *D) { return Globals[D]; }
 
 void CGModule::run(ModuleDeclaration *Mod) {
+  this->Mod = Mod;
   for (auto *Decl : Mod->getDecls()) {
     if (auto *Var = llvm::dyn_cast<VariableDeclaration>(Decl)) {
       llvm::GlobalVariable *V = new llvm::GlobalVariable(
