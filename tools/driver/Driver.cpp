@@ -179,12 +179,12 @@ int main(int Argc, const char **Argv) {
   auto TheLexer = Lexer(SrcMgr, Diags);
   auto TheSema = Sema(Diags);
   auto TheParser = Parser(TheLexer, TheSema);
-  auto *Mod = TheParser.parse();
+  auto Mod = TheParser.parse();
   bool HadErrors = Diags.numErrors() > 0;
   if (Mod && !Diags.numErrors()) {
     llvm::LLVMContext Ctx;
     if (CodeGenerator *CG = CodeGenerator::create(Ctx, TM)) {
-      std::unique_ptr<llvm::Module> M = CG->run(Mod, InputFile);
+      std::unique_ptr<llvm::Module> M = CG->run(Mod.get(), InputFile);
       if (!emit(Argv[0], M.get(), TM, InputFile)) {
         llvm::WithColor::error(llvm::errs(), Argv[0])
             << "Error writing output\n";

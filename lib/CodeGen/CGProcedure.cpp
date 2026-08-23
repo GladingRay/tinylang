@@ -151,10 +151,10 @@ CGProcedure::createFunctionType(ProcedureDeclaration *Proc) {
   if (Proc->getRetType()) {
     ResultTy = mapType(Proc->getRetType());
   }
-  auto FormalParams = Proc->getFormalParams();
+  const auto &FormalParams = Proc->getFormalParams();
   llvm::SmallVector<llvm::Type *, 8> ParamTypes;
-  for (auto FP : FormalParams) {
-    llvm::Type *Ty = mapType(FP);
+  for (const auto &FP : FormalParams) {
+    llvm::Type *Ty = mapType(FP.get());
     ParamTypes.push_back(Ty);
   }
   return llvm::FunctionType::get(ResultTy, ParamTypes,
@@ -169,7 +169,8 @@ llvm::Function *CGProcedure::createFunction(ProcedureDeclaration *Proc,
   // Give parameters a name.
   for (auto Pair : llvm::enumerate(Fn->args())) {
     llvm::Argument &Arg = Pair.value();
-    FormalParameterDeclaration *FP = Proc->getFormalParams()[Pair.index()];
+    FormalParameterDeclaration *FP =
+        Proc->getFormalParams()[Pair.index()].get();
     if (FP->isVar()) {
       llvm::AttrBuilder Attr(CGM.getLLVMCtx());
       llvm::TypeSize Sz = CGM.getModule()->getDataLayout().getTypeStoreSize(
@@ -364,18 +365,16 @@ void CGProcedure::emitStmt(ReturnStatement *Stmt) {
 }
 
 void CGProcedure::emit(const StmtList &Stmts) {
-  for (auto *S : Stmts) {
-    if (auto *Stmt = llvm::dyn_cast<AssignmentStatement>(S))
+  for (const auto &S : Stmts) {
+    if (auto *Stmt = llvm::dyn_cast<AssignmentStatement>(S.get()))
       emitStmt(Stmt);
-    else if (auto *Stmt =
-                 llvm::dyn_cast<ProcedureCallStatement>(S))
+    else if (auto *Stmt = llvm::dyn_cast<ProcedureCallStatement>(S.get()))
       emitStmt(Stmt);
-    else if (auto *Stmt = llvm::dyn_cast<IfStatement>(S))
+    else if (auto *Stmt = llvm::dyn_cast<IfStatement>(S.get()))
       emitStmt(Stmt);
-    else if (auto *Stmt = llvm::dyn_cast<WhileStatement>(S))
+    else if (auto *Stmt = llvm::dyn_cast<WhileStatement>(S.get()))
       emitStmt(Stmt);
-    else if (auto *Stmt =
-                 llvm::dyn_cast<ReturnStatement>(S))
+    else if (auto *Stmt = llvm::dyn_cast<ReturnStatement>(S.get()))
       emitStmt(Stmt);
     else
       llvm_unreachable("Unknown statement");
@@ -394,16 +393,16 @@ void CGProcedure::run(ProcedureDeclaration *Proc) {
   for (auto Pair : llvm::enumerate(Fn->args())) {
     llvm::Argument *Arg = &Pair.value();
     FormalParameterDeclaration *FP =
-        Proc->getFormalParams()[Pair.index()];
+        Proc->getFormalParams()[Pair.index()].get();
     // Create mapping FormalParameter -> llvm::Argument for
     // VAR parameters.
     FormalParams[FP] = Arg;
     writeLocalVariable(Curr, FP, Arg);
   }
 
-  for (auto *D : Proc->getDecls()) {
+  for (const auto &D : Proc->getDecls()) {
     if (auto *Var =
-            llvm::dyn_cast<VariableDeclaration>(D)) {
+            llvm::dyn_cast<VariableDeclaration>(D.get())) {
       llvm::Type *Ty = mapType(Var);
       if (Ty->isAggregateType()) {
         llvm::Value *Val = Builder.CreateAlloca(Ty);
@@ -412,7 +411,6 @@ void CGProcedure::run(ProcedureDeclaration *Proc) {
     }
   }
 
-  auto Block = Proc->getStmts();
   emit(Proc->getStmts());
   if (!Curr->getTerminator()) {
     Builder.CreateRetVoid();

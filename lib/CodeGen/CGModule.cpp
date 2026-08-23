@@ -37,13 +37,14 @@ llvm::GlobalObject *CGModule::getGlobal(Decl *D) { return Globals[D]; }
 
 void CGModule::run(ModuleDeclaration *Mod) {
   this->Mod = Mod;
-  for (auto *Decl : Mod->getDecls()) {
-    if (auto *Var = llvm::dyn_cast<VariableDeclaration>(Decl)) {
+  for (const auto &Decl : Mod->getDecls()) {
+    if (auto *Var = llvm::dyn_cast<VariableDeclaration>(Decl.get())) {
       llvm::GlobalVariable *V = new llvm::GlobalVariable(
           *M, convertType(Var->getType()), false,
           llvm::GlobalValue::PrivateLinkage, nullptr, mangleName(Var));
       Globals[Var] = V;
-    } else if (auto *Proc = llvm::dyn_cast<ProcedureDeclaration>(Decl)) {
+    } else if (auto *Proc =
+                   llvm::dyn_cast<ProcedureDeclaration>(Decl.get())) {
       CGProcedure CGP(*this);
       CGP.run(Proc);
     }

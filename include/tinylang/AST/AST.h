@@ -4,7 +4,9 @@
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SMLoc.h"
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace tinylang {
@@ -16,10 +18,10 @@ class FormalParameterDeclaration;
 class Expr;
 class Stmt;
 
-using DeclList = std::vector<Decl *>;
-using FormalParamList = std::vector<FormalParameterDeclaration *>;
-using ExprList = std::vector<Expr *>;
-using StmtList = std::vector<Stmt *>;
+using DeclList = std::vector<std::unique_ptr<Decl>>;
+using FormalParamList = std::vector<std::unique_ptr<FormalParameterDeclaration>>;
+using ExprList = std::vector<std::unique_ptr<Expr>>;
+using StmtList = std::vector<std::unique_ptr<Stmt>>;
 
 class Ident {
   SMLoc Loc;
@@ -48,6 +50,7 @@ protected:
 public:
   Decl(DeclKind Kind, Decl *EnclosingDecl, SMLoc Loc, StringRef Name)
       : Kind(Kind), EnclosingDecl(EnclosingDecl), Loc(Loc), Name(Name) {}
+  virtual ~Decl() = default;
 
   DeclKind getKind() const { return Kind; }
   SMLoc getLocation() { return Loc; }
@@ -64,25 +67,27 @@ public:
       : Decl(DK_Module, EnclosingDecl, Loc, Name) {}
 
   ModuleDeclaration(Decl *EnclosingDecl, SMLoc Loc, StringRef Name,
-                    DeclList &Decls, StmtList &Stmts)
-      : Decl(DK_Module, EnclosingDecl, Loc, Name), Decls(Decls), Stmts(Stmts) {}
+                    DeclList Decls, StmtList Stmts)
+      : Decl(DK_Module, EnclosingDecl, Loc, Name), Decls(std::move(Decls)),
+        Stmts(std::move(Stmts)) {}
 
   const DeclList &getDecls() { return Decls; }
-  void setDecls(DeclList &D) { Decls = D; }
+  void setDecls(DeclList D) { Decls = std::move(D); }
   const StmtList &getStmts() { return Stmts; }
-  void setStmts(StmtList &L) { Stmts = L; }
+  void setStmts(StmtList L) { Stmts = std::move(L); }
 
   static bool classof(const Decl *D) { return D->getKind() == DK_Module; }
 };
 
 class ConstantDeclaration : public Decl {
-  Expr *E;
+  std::unique_ptr<Expr> E;
 
 public:
-  ConstantDeclaration(Decl *EnclosingDecl, SMLoc Loc, StringRef Name, Expr *E)
-      : Decl(DK_Const, EnclosingDecl, Loc, Name), E(E) {}
+  ConstantDeclaration(Decl *EnclosingDecl, SMLoc Loc, StringRef Name,
+                      std::unique_ptr<Expr> E)
+      : Decl(DK_Const, EnclosingDecl, Loc, Name), E(std::move(E)) {}
 
-  Expr *getExpr() { return E; }
+  Expr *getExpr() { return E.get(); }
 
   static bool classof(const Decl *D) { return D->getKind() == DK_Const; }
 };
@@ -134,20 +139,20 @@ public:
       : Decl(DK_Proc, EnclosingDecl, Loc, Name) {}
 
   ProcedureDeclaration(Decl *EnclosingDecl, SMLoc Loc, StringRef Name,
-                       FormalParamList &Params, TypeDeclaration *RetType,
-                       DeclList &Decls, StmtList &Stmts)
-      : Decl(DK_Proc, EnclosingDecl, Loc, Name), Params(Params),
-        RetType(RetType), Decls(Decls), Stmts(Stmts) {}
+                       FormalParamList Params, TypeDeclaration *RetType,
+                       DeclList Decls, StmtList Stmts)
+      : Decl(DK_Proc, EnclosingDecl, Loc, Name), Params(std::move(Params)),
+        RetType(RetType), Decls(std::move(Decls)), Stmts(std::move(Stmts)) {}
 
   const FormalParamList &getFormalParams() { return Params; }
-  void setFormalParams(FormalParamList &FP) { Params = FP; }
+  void setFormalParams(FormalParamList FP) { Params = std::move(FP); }
   TypeDeclaration *getRetType() { return RetType; }
   void setRetType(TypeDeclaration *Ty) { RetType = Ty; }
 
   const DeclList &getDecls() { return Decls; }
-  void setDecls(DeclList &D) { Decls = D; }
+  void setDecls(DeclList D) { Decls = std::move(D); }
   const StmtList &getStmts() { return Stmts; }
-  void setStmts(StmtList &L) { Stmts = L; }
+  void setStmts(StmtList L) { Stmts = std::move(L); }
 
   static bool classof(const Decl *D) { return D->getKind() == DK_Proc; }
 };
@@ -189,6 +194,7 @@ protected:
       : Kind(Kind), Ty(Ty), IsConstant(IsConst) {}
 
 public:
+  virtual ~Expr() = default;
   ExprKind getKind() const { return Kind; }
   TypeDeclaration *getType() { return Ty; }
   void setType(TypeDeclaration *T) { Ty = T; }
@@ -196,31 +202,33 @@ public:
 };
 
 class InfixExpression : public Expr {
-  Expr *Left;
-  Expr *Right;
+  std::unique_ptr<Expr> Left;
+  std::unique_ptr<Expr> Right;
   const OperatorInfo Op;
 
 public:
-  InfixExpression(Expr *Left, Expr *Right, OperatorInfo Op, TypeDeclaration *Ty,
-                  bool IsConst)
-      : Expr(EK_Infix, Ty, IsConst), Left(Left), Right(Right), Op(Op) {}
+  InfixExpression(std::unique_ptr<Expr> Left, std::unique_ptr<Expr> Right,
+                  OperatorInfo Op, TypeDeclaration *Ty, bool IsConst)
+      : Expr(EK_Infix, Ty, IsConst), Left(std::move(Left)),
+        Right(std::move(Right)), Op(Op) {}
 
-  Expr *getLeft() { return Left; }
-  Expr *getRight() { return Right; }
+  Expr *getLeft() { return Left.get(); }
+  Expr *getRight() { return Right.get(); }
   const OperatorInfo &getOperatorInfo() { return Op; }
 
   static bool classof(const Expr *E) { return E->getKind() == EK_Infix; }
 };
 
 class PrefixExpression : public Expr {
-  Expr *E;
+  std::unique_ptr<Expr> E;
   const OperatorInfo Op;
 
 public:
-  PrefixExpression(Expr *E, OperatorInfo Op, TypeDeclaration *Ty, bool IsConst)
-      : Expr(EK_Prefix, Ty, IsConst), E(E), Op(Op) {}
+  PrefixExpression(std::unique_ptr<Expr> E, OperatorInfo Op,
+                   TypeDeclaration *Ty, bool IsConst)
+      : Expr(EK_Prefix, Ty, IsConst), E(std::move(E)), Op(Op) {}
 
-  Expr *getExpr() { return E; }
+  Expr *getExpr() { return E.get(); }
   const OperatorInfo &getOperatorInfo() { return Op; }
 
   static bool classof(const Expr *E) { return E->getKind() == EK_Prefix; }
@@ -281,7 +289,8 @@ class FunctionCallExpr : public Expr {
 
 public:
   FunctionCallExpr(ProcedureDeclaration *Proc, ExprList Params)
-      : Expr(EK_Func, Proc->getRetType(), false), Proc(Proc), Params(Params) {}
+      : Expr(EK_Func, Proc->getRetType(), false), Proc(Proc),
+        Params(std::move(Params)) {}
 
   ProcedureDeclaration *getDecl() { return Proc; }
   const ExprList &getParams() { return Params; }
@@ -300,19 +309,20 @@ protected:
   Stmt(StmtKind Kind) : Kind(Kind) {}
 
 public:
+  virtual ~Stmt() = default;
   StmtKind getKind() const { return Kind; }
 };
 
 class AssignmentStatement : public Stmt {
   Decl *Var;
-  Expr *E;
+  std::unique_ptr<Expr> E;
 
 public:
-  AssignmentStatement(Decl *Var, Expr *E)
-      : Stmt(SK_Assign), Var(Var), E(E) {}
+  AssignmentStatement(Decl *Var, std::unique_ptr<Expr> E)
+      : Stmt(SK_Assign), Var(Var), E(std::move(E)) {}
 
   Decl *getVar() { return Var; }
-  Expr *getExpr() { return E; }
+  Expr *getExpr() { return E.get(); }
 
   static bool classof(const Stmt *S) { return S->getKind() == SK_Assign; }
 };
@@ -322,8 +332,8 @@ class ProcedureCallStatement : public Stmt {
   ExprList Params;
 
 public:
-  ProcedureCallStatement(ProcedureDeclaration *Proc, ExprList &Params)
-      : Stmt(SK_ProcCall), Proc(Proc), Params(Params) {}
+  ProcedureCallStatement(ProcedureDeclaration *Proc, ExprList Params)
+      : Stmt(SK_ProcCall), Proc(Proc), Params(std::move(Params)) {}
 
   ProcedureDeclaration *getProc() { return Proc; }
   const ExprList &getParams() { return Params; }
@@ -332,15 +342,16 @@ public:
 };
 
 class IfStatement : public Stmt {
-  Expr *Cond;
+  std::unique_ptr<Expr> Cond;
   StmtList IfStmts;
   StmtList ElseStmts;
 
 public:
-  IfStatement(Expr *Cond, StmtList &IfStmts, StmtList &ElseStmts)
-      : Stmt(SK_If), Cond(Cond), IfStmts(IfStmts), ElseStmts(ElseStmts) {}
+  IfStatement(std::unique_ptr<Expr> Cond, StmtList IfStmts, StmtList ElseStmts)
+      : Stmt(SK_If), Cond(std::move(Cond)), IfStmts(std::move(IfStmts)),
+        ElseStmts(std::move(ElseStmts)) {}
 
-  Expr *getCond() { return Cond; }
+  Expr *getCond() { return Cond.get(); }
   const StmtList &getIfStmts() { return IfStmts; }
   const StmtList &getElseStmts() { return ElseStmts; }
 
@@ -348,26 +359,27 @@ public:
 };
 
 class WhileStatement : public Stmt {
-  Expr *Cond;
+  std::unique_ptr<Expr> Cond;
   StmtList Stmts;
 
 public:
-  WhileStatement(Expr *Cond, StmtList &Stmts)
-      : Stmt(SK_While), Cond(Cond), Stmts(Stmts) {}
+  WhileStatement(std::unique_ptr<Expr> Cond, StmtList Stmts)
+      : Stmt(SK_While), Cond(std::move(Cond)), Stmts(std::move(Stmts)) {}
 
-  Expr *getCond() { return Cond; }
+  Expr *getCond() { return Cond.get(); }
   const StmtList &getWhileStmts() { return Stmts; }
 
   static bool classof(const Stmt *S) { return S->getKind() == SK_While; }
 };
 
 class ReturnStatement : public Stmt {
-  Expr *RetVal;
+  std::unique_ptr<Expr> RetVal;
 
 public:
-  ReturnStatement(Expr *RetVal) : Stmt(SK_Return), RetVal(RetVal) {}
+  ReturnStatement(std::unique_ptr<Expr> RetVal)
+      : Stmt(SK_Return), RetVal(std::move(RetVal)) {}
 
-  Expr *getRetVal() { return RetVal; }
+  Expr *getRetVal() { return RetVal.get(); }
 
   static bool classof(const Stmt *S) { return S->getKind() == SK_Return; }
 };

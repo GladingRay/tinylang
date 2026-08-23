@@ -30,13 +30,13 @@ bool Sema::isOperatorForType(tok::TokenKind Op, TypeDeclaration *Ty) {
   case tok::star:
   case tok::kw_DIV:
   case tok::kw_MOD:
-    return Ty == IntegerType;
+    return Ty == IntegerType.get();
   case tok::slash:
     return false; // REAL not implemented
   case tok::kw_AND:
   case tok::kw_OR:
   case tok::kw_NOT:
-    return Ty == BooleanType;
+    return Ty == BooleanType.get();
   default:
     llvm_unreachable("Unknown operator");
   }
@@ -51,8 +51,8 @@ void Sema::checkFormalAndActualParameters(SMLoc Loc,
   }
   auto A = Actuals.begin();
   for (auto I = Formals.begin(), E = Formals.end(); I != E; ++I, ++A) {
-    FormalParameterDeclaration *F = *I;
-    Expr *Arg = *A;
+    FormalParameterDeclaration *F = I->get();
+    Expr *Arg = A->get();
     if (!Arg)
       continue;
     if (F->getType() != Arg->getType())
@@ -67,22 +67,25 @@ void Sema::initialize() {
   // Setup global scope.
   CurrentScope = new Scope();
   CurrentDecl = nullptr;
-  IntegerType = new TypeDeclaration(CurrentDecl, SMLoc(), "INTEGER");
-  BooleanType = new TypeDeclaration(CurrentDecl, SMLoc(), "BOOLEAN");
-  TrueLiteral = new BooleanLiteral(true, BooleanType);
-  FalseLiteral = new BooleanLiteral(false, BooleanType);
-  TrueConst =
-      new ConstantDeclaration(CurrentDecl, SMLoc(), "TRUE", TrueLiteral);
-  FalseConst =
-      new ConstantDeclaration(CurrentDecl, SMLoc(), "FALSE", FalseLiteral);
-  CurrentScope->insert(IntegerType);
-  CurrentScope->insert(BooleanType);
-  CurrentScope->insert(TrueConst);
-  CurrentScope->insert(FalseConst);
+  IntegerType =
+      std::make_unique<TypeDeclaration>(CurrentDecl, SMLoc(), "INTEGER");
+  BooleanType =
+      std::make_unique<TypeDeclaration>(CurrentDecl, SMLoc(), "BOOLEAN");
+  TrueConst = std::make_unique<ConstantDeclaration>(
+      CurrentDecl, SMLoc(), "TRUE",
+      std::make_unique<BooleanLiteral>(true, BooleanType.get()));
+  FalseConst = std::make_unique<ConstantDeclaration>(
+      CurrentDecl, SMLoc(), "FALSE",
+      std::make_unique<BooleanLiteral>(false, BooleanType.get()));
+  CurrentScope->insert(IntegerType.get());
+  CurrentScope->insert(BooleanType.get());
+  CurrentScope->insert(TrueConst.get());
+  CurrentScope->insert(FalseConst.get());
 }
 
-ModuleDeclaration *Sema::actOnModuleDeclaration(SMLoc Loc, StringRef Name) {
-  return new ModuleDeclaration(CurrentDecl, Loc, Name);
+std::unique_ptr<ModuleDeclaration>
+Sema::actOnModuleDeclaration(SMLoc Loc, StringRef Name) {
+  return std::make_unique<ModuleDeclaration>(CurrentDecl, Loc, Name);
 }
 
 void Sema::actOnModuleDeclaration(ModuleDeclaration *ModDecl, SMLoc Loc,
@@ -93,8 +96,8 @@ void Sema::actOnModuleDeclaration(ModuleDeclaration *ModDecl, SMLoc Loc,
     Diags.report(ModDecl->getLocation(),
                  diag::note_module_identifier_declaration);
   }
-  ModDecl->setDecls(Decls);
-  ModDecl->setStmts(Stmts);
+  ModDecl->setDecls(std::move(Decls));
+  ModDecl->setStmts(std::move(Stmts));
 }
 
 void Sema::actOnImport(StringRef ModuleName, IdentList &Ids) {
@@ -102,12 +105,12 @@ void Sema::actOnImport(StringRef ModuleName, IdentList &Ids) {
 }
 
 void Sema::actOnConstantDeclaration(DeclList &Decls, SMLoc Loc, StringRef Name,
-                                    Expr *E) {
+                                    std::unique_ptr<Expr> E) {
   assert(CurrentScope && "CurrentScope not set");
-  ConstantDeclaration *Decl =
-      new ConstantDeclaration(CurrentDecl, Loc, Name, E);
-  if (CurrentScope->insert(Decl))
-    Decls.push_back(Decl);
+  auto Decl = std::make_unique<ConstantDeclaration>(CurrentDecl, Loc, Name,
+                                                    std::move(E));
+  if (CurrentScope->insert(Decl.get()))
+    Decls.push_back(std::move(Decl));
   else
     Diags.report(Loc, diag::err_symbold_declared, Name);
 }
@@ -118,9 +121,10 @@ void Sema::actOnVariableDeclaration(DeclList &Decls, IdentList &Ids, Decl *D) {
     return;
   if (TypeDeclaration *Ty = dyn_cast<TypeDeclaration>(D)) {
     for (auto &[Loc, Name] : Ids) {
-      auto *Decl = new VariableDeclaration(CurrentDecl, Loc, Name, Ty);
-      if (CurrentScope->insert(Decl))
-        Decls.push_back(Decl);
+      auto Decl =
+          std::make_unique<VariableDeclaration>(CurrentDecl, Loc, Name, Ty);
+      if (CurrentScope->insert(Decl.get()))
+        Decls.push_back(std::move(Decl));
       else
         Diags.report(Loc, diag::err_symbold_declared, Name);
     }
@@ -138,10 +142,10 @@ void Sema::actOnFormalParameterDeclaration(FormalParamList &Params,
     return;
   if (TypeDeclaration *Ty = dyn_cast<TypeDeclaration>(D)) {
     for (auto &[Loc, Name] : Ids) {
-      FormalParameterDeclaration *Decl =
-          new FormalParameterDeclaration(CurrentDecl, Loc, Name, Ty, IsVar);
-      if (CurrentScope->insert(Decl))
-        Params.push_back(Decl);
+      auto Decl = std::make_unique<FormalParameterDeclaration>(
+          CurrentDecl, Loc, Name, Ty, IsVar);
+      if (CurrentScope->insert(Decl.get()))
+        Params.push_back(std::move(Decl));
       else
         Diags.report(Loc, diag::err_symbold_declared, Name);
     }
@@ -151,18 +155,18 @@ void Sema::actOnFormalParameterDeclaration(FormalParamList &Params,
   }
 }
 
-ProcedureDeclaration *Sema::actOnProcedureDeclaration(SMLoc Loc,
-                                                      StringRef Name) {
-  ProcedureDeclaration *P = new ProcedureDeclaration(CurrentDecl, Loc, Name);
-  if (!CurrentScope->insert(P))
+std::unique_ptr<ProcedureDeclaration>
+Sema::actOnProcedureDeclaration(SMLoc Loc, StringRef Name) {
+  auto P = std::make_unique<ProcedureDeclaration>(CurrentDecl, Loc, Name);
+  if (!CurrentScope->insert(P.get()))
     Diags.report(Loc, diag::err_symbold_declared, Name);
   return P;
 }
 
 void Sema::actOnProcedureHeading(ProcedureDeclaration *ProcDecl,
-                                 FormalParamList &Params, Decl *RetType,
+                                 FormalParamList Params, Decl *RetType,
                                  SMLoc RetTypeLoc) {
-  ProcDecl->setFormalParams(Params);
+  ProcDecl->setFormalParams(std::move(Params));
   auto *RetTypeDecl = dyn_cast_or_null<TypeDeclaration>(RetType);
   if (!RetTypeDecl && RetType)
     Diags.report(RetTypeLoc, diag::err_returntype_must_be_type);
@@ -179,11 +183,12 @@ void Sema::actOnProcedureDeclaration(ProcedureDeclaration *ProcDecl, SMLoc Loc,
     Diags.report(ProcDecl->getLocation(),
                  diag::note_proc_identifier_declaration);
   }
-  ProcDecl->setDecls(Decls);
-  ProcDecl->setStmts(Stmts);
+  ProcDecl->setDecls(std::move(Decls));
+  ProcDecl->setStmts(std::move(Stmts));
 }
 
-void Sema::actOnAssignment(StmtList &Stmts, SMLoc Loc, Decl *D, Expr *E) {
+void Sema::actOnAssignment(StmtList &Stmts, SMLoc Loc, Decl *D,
+                           std::unique_ptr<Expr> E) {
   if (!D || !E)
     return;
   TypeDeclaration *Ty = nullptr;
@@ -199,46 +204,52 @@ void Sema::actOnAssignment(StmtList &Stmts, SMLoc Loc, Decl *D, Expr *E) {
     Diags.report(Loc, diag::err_types_for_operator_not_compatible,
                  getOperatorSpelling(tok::colonequal));
   }
-  Stmts.push_back(new AssignmentStatement(D, E));
+  Stmts.push_back(std::make_unique<AssignmentStatement>(D, std::move(E)));
 }
 
 void Sema::actOnProcCall(StmtList &Stmts, SMLoc Loc, Decl *D,
-                         ExprList &Params) {
+                         ExprList Params) {
   if (!D)
     return;
   if (auto Proc = dyn_cast<ProcedureDeclaration>(D)) {
     checkFormalAndActualParameters(Loc, Proc->getFormalParams(), Params);
     if (Proc->getRetType())
       Diags.report(Loc, diag::err_procedure_call_on_nonprocedure);
-    Stmts.push_back(new ProcedureCallStatement(Proc, Params));
+    Stmts.push_back(
+        std::make_unique<ProcedureCallStatement>(Proc, std::move(Params)));
   } else if (D) {
     Diags.report(Loc, diag::err_procedure_call_on_nonprocedure);
   }
 }
 
-void Sema::actOnIfStatement(StmtList &Stmts, SMLoc Loc, Expr *Cond,
-                            StmtList &IfStmts, StmtList &ElseStmts) {
+void Sema::actOnIfStatement(StmtList &Stmts, SMLoc Loc,
+                            std::unique_ptr<Expr> Cond, StmtList IfStmts,
+                            StmtList ElseStmts) {
   if (!Cond)
-    Cond = FalseLiteral;
+    Cond = std::make_unique<BooleanLiteral>(false, BooleanType.get());
 
-  if (Cond->getType() != BooleanType) {
+  if (Cond->getType() != BooleanType.get()) {
     Diags.report(Loc, diag::err_if_expr_must_be_bool);
   }
-  Stmts.push_back(new IfStatement(Cond, IfStmts, ElseStmts));
+  Stmts.push_back(std::make_unique<IfStatement>(
+      std::move(Cond), std::move(IfStmts), std::move(ElseStmts)));
 }
 
-void Sema::actOnWhileStatement(StmtList &Stmts, SMLoc Loc, Expr *Cond,
-                               StmtList &WhileStmts) {
+void Sema::actOnWhileStatement(StmtList &Stmts, SMLoc Loc,
+                               std::unique_ptr<Expr> Cond,
+                               StmtList WhileStmts) {
   if (!Cond)
-    Cond = FalseLiteral;
+    Cond = std::make_unique<BooleanLiteral>(false, BooleanType.get());
 
-  if (Cond->getType() != BooleanType) {
+  if (Cond->getType() != BooleanType.get()) {
     Diags.report(Loc, diag::err_while_expr_must_be_bool);
   }
-  Stmts.push_back(new WhileStatement(Cond, WhileStmts));
+  Stmts.push_back(
+      std::make_unique<WhileStatement>(std::move(Cond), std::move(WhileStmts)));
 }
 
-void Sema::actOnReturnStatement(StmtList &Stmts, SMLoc Loc, Expr *RetVal) {
+void Sema::actOnReturnStatement(StmtList &Stmts, SMLoc Loc,
+                                std::unique_ptr<Expr> RetVal) {
   auto *Proc = cast<ProcedureDeclaration>(CurrentDecl);
   if (Proc->getRetType() && !RetVal)
     Diags.report(Loc, diag::err_function_requires_return);
@@ -249,10 +260,12 @@ void Sema::actOnReturnStatement(StmtList &Stmts, SMLoc Loc, Expr *RetVal) {
       Diags.report(Loc, diag::err_function_and_return_type);
   }
 
-  Stmts.push_back(new ReturnStatement(RetVal));
+  Stmts.push_back(std::make_unique<ReturnStatement>(std::move(RetVal)));
 }
 
-Expr *Sema::actOnExpression(Expr *Left, Expr *Right, const OperatorInfo &Op) {
+std::unique_ptr<Expr>
+Sema::actOnExpression(std::unique_ptr<Expr> Left, std::unique_ptr<Expr> Right,
+                      const OperatorInfo &Op) {
   // Relation
   if (!Left)
     return Right;
@@ -264,11 +277,14 @@ Expr *Sema::actOnExpression(Expr *Left, Expr *Right, const OperatorInfo &Op) {
                  getOperatorSpelling(Op.getKind()));
   }
   bool IsConst = Left->isConst() && Right->isConst();
-  return new InfixExpression(Left, Right, Op, BooleanType, IsConst);
+  return std::make_unique<InfixExpression>(std::move(Left), std::move(Right),
+                                           Op, BooleanType.get(), IsConst);
 }
 
-Expr *Sema::actOnSimpleExpression(Expr *Left, Expr *Right,
-                                  const OperatorInfo &Op) {
+std::unique_ptr<Expr>
+Sema::actOnSimpleExpression(std::unique_ptr<Expr> Left,
+                            std::unique_ptr<Expr> Right,
+                            const OperatorInfo &Op) {
   // Addition
   if (!Left)
     return Right;
@@ -282,14 +298,18 @@ Expr *Sema::actOnSimpleExpression(Expr *Left, Expr *Right,
   TypeDeclaration *Ty = Left->getType();
   bool IsConst = Left->isConst() && Right->isConst();
   if (IsConst && Op.getKind() == tok::kw_OR) {
-    BooleanLiteral *L = dyn_cast<BooleanLiteral>(Left);
-    BooleanLiteral *R = dyn_cast<BooleanLiteral>(Right);
-    return L->getValue() || R->getValue() ? TrueLiteral : FalseLiteral;
+    if (auto *L = dyn_cast<BooleanLiteral>(Left.get()))
+      if (auto *R = dyn_cast<BooleanLiteral>(Right.get()))
+        return std::make_unique<BooleanLiteral>(L->getValue() || R->getValue(),
+                                                BooleanType.get());
   }
-  return new InfixExpression(Left, Right, Op, Ty, IsConst);
+  return std::make_unique<InfixExpression>(std::move(Left), std::move(Right),
+                                           Op, Ty, IsConst);
 }
 
-Expr *Sema::actOnTerm(Expr *Left, Expr *Right, const OperatorInfo &Op) {
+std::unique_ptr<Expr> Sema::actOnTerm(std::unique_ptr<Expr> Left,
+                                      std::unique_ptr<Expr> Right,
+                                      const OperatorInfo &Op) {
   // Multiplication
   if (!Left)
     return Right;
@@ -304,14 +324,17 @@ Expr *Sema::actOnTerm(Expr *Left, Expr *Right, const OperatorInfo &Op) {
   TypeDeclaration *Ty = Left->getType();
   bool IsConst = Left->isConst() && Right->isConst();
   if (IsConst && Op.getKind() == tok::kw_AND) {
-    BooleanLiteral *L = dyn_cast<BooleanLiteral>(Left);
-    BooleanLiteral *R = dyn_cast<BooleanLiteral>(Right);
-    return L->getValue() && R->getValue() ? TrueLiteral : FalseLiteral;
+    if (auto *L = dyn_cast<BooleanLiteral>(Left.get()))
+      if (auto *R = dyn_cast<BooleanLiteral>(Right.get()))
+        return std::make_unique<BooleanLiteral>(L->getValue() && R->getValue(),
+                                                BooleanType.get());
   }
-  return new InfixExpression(Left, Right, Op, Ty, IsConst);
+  return std::make_unique<InfixExpression>(std::move(Left), std::move(Right),
+                                           Op, Ty, IsConst);
 }
 
-Expr *Sema::actOnPrefixExpression(Expr *E, const OperatorInfo &Op) {
+std::unique_ptr<Expr>
+Sema::actOnPrefixExpression(std::unique_ptr<Expr> E, const OperatorInfo &Op) {
   if (!E)
     return nullptr;
 
@@ -321,16 +344,17 @@ Expr *Sema::actOnPrefixExpression(Expr *E, const OperatorInfo &Op) {
   }
 
   if (E->isConst() && Op.getKind() == tok::kw_NOT) {
-    BooleanLiteral *L = dyn_cast<BooleanLiteral>(E);
-    return L->getValue() ? FalseLiteral : TrueLiteral;
+    if (auto *L = dyn_cast<BooleanLiteral>(E.get()))
+      return std::make_unique<BooleanLiteral>(!L->getValue(),
+                                              BooleanType.get());
   }
 
   if (Op.getKind() == tok::minus) {
     bool Ambiguous = true;
-    if (isa<IntegerLiteral>(E) || isa<VariableAccess>(E) ||
-        isa<ConstantAccess>(E))
+    if (isa<IntegerLiteral>(E.get()) || isa<VariableAccess>(E.get()) ||
+        isa<ConstantAccess>(E.get()))
       Ambiguous = false;
-    else if (auto *Infix = dyn_cast<InfixExpression>(E)) {
+    else if (auto *Infix = dyn_cast<InfixExpression>(E.get())) {
       tok::TokenKind Kind = Infix->getOperatorInfo().getKind();
       if (Kind == tok::star || Kind == tok::slash)
         Ambiguous = false;
@@ -340,10 +364,12 @@ Expr *Sema::actOnPrefixExpression(Expr *E, const OperatorInfo &Op) {
     }
   }
 
-  return new PrefixExpression(E, Op, E->getType(), E->isConst());
+  TypeDeclaration *Ty = E->getType();
+  bool IsConst = E->isConst();
+  return std::make_unique<PrefixExpression>(std::move(E), Op, Ty, IsConst);
 }
 
-Expr *Sema::actOnIntegerLiteral(SMLoc Loc, StringRef Literal) {
+std::unique_ptr<Expr> Sema::actOnIntegerLiteral(SMLoc Loc, StringRef Literal) {
   uint8_t Radix = 10;
   if (Literal.ends_with("H")) {
     Literal = Literal.drop_back();
@@ -355,35 +381,31 @@ Expr *Sema::actOnIntegerLiteral(SMLoc Loc, StringRef Literal) {
       !llvm::all_of(Literal, [](char C) { return C >= '0' && C <= '9'; }))
     Literal = "0";
   llvm::APInt Value(64, Literal, Radix);
-  return new IntegerLiteral(Loc, llvm::APSInt(Value, false), IntegerType);
+  return std::make_unique<IntegerLiteral>(Loc, llvm::APSInt(Value, false),
+                                          IntegerType.get());
 }
 
-Expr *Sema::actOnVariable(Decl *D) {
+std::unique_ptr<Expr> Sema::actOnVariable(Decl *D) {
   if (!D)
     return nullptr;
   if (auto *V = dyn_cast<VariableDeclaration>(D))
-    return new VariableAccess(V);
+    return std::make_unique<VariableAccess>(V);
   else if (auto *P = dyn_cast<FormalParameterDeclaration>(D))
-    return new VariableAccess(P);
-  else if (auto *C = dyn_cast<ConstantDeclaration>(D)) {
-    if (C == TrueConst)
-      return TrueLiteral;
-    if (C == FalseConst) {
-      return FalseLiteral;
-    }
-    return new ConstantAccess(C);
-  }
+    return std::make_unique<VariableAccess>(P);
+  else if (auto *C = dyn_cast<ConstantDeclaration>(D))
+    return std::make_unique<ConstantAccess>(C);
   return nullptr;
 }
 
-Expr *Sema::actOnFunctionCall(SMLoc Loc, Decl *D, ExprList &Params) {
+std::unique_ptr<Expr> Sema::actOnFunctionCall(SMLoc Loc, Decl *D,
+                                              ExprList Params) {
   if (!D)
     return nullptr;
   if (auto *P = dyn_cast<ProcedureDeclaration>(D)) {
     checkFormalAndActualParameters(Loc, P->getFormalParams(), Params);
     if (!P->getRetType())
       Diags.report(Loc, diag::err_function_call_on_nonfunction);
-    return new FunctionCallExpr(P, Params);
+    return std::make_unique<FunctionCallExpr>(P, std::move(Params));
   }
   Diags.report(Loc, diag::err_function_call_on_nonfunction);
   return nullptr;
@@ -394,10 +416,10 @@ Decl *Sema::actOnQualIdentPart(Decl *Prev, SMLoc Loc, StringRef Name) {
     if (Decl *D = CurrentScope->lookup(Name))
       return D;
   } else if (auto *Mod = dyn_cast<ModuleDeclaration>(Prev)) {
-    auto Decls = Mod->getDecls();
+    const auto &Decls = Mod->getDecls();
     for (auto I = Decls.begin(), E = Decls.end(); I != E; ++I) {
       if ((*I)->getName() == Name) {
-        return *I;
+        return I->get();
       }
     }
   } else {

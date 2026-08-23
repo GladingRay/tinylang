@@ -21,52 +21,63 @@ class Sema {
   Decl *CurrentDecl;
   DiagnosticsEngine &Diags;
 
-  TypeDeclaration *IntegerType;
-  TypeDeclaration *BooleanType;
-  BooleanLiteral *TrueLiteral;
-  BooleanLiteral *FalseLiteral;
-  ConstantDeclaration *TrueConst;
-  ConstantDeclaration *FalseConst;
+  std::unique_ptr<TypeDeclaration> IntegerType;
+  std::unique_ptr<TypeDeclaration> BooleanType;
+  std::unique_ptr<ConstantDeclaration> TrueConst;
+  std::unique_ptr<ConstantDeclaration> FalseConst;
 
 public:
   Sema(DiagnosticsEngine &Diags)
       : CurrentScope(nullptr), CurrentDecl(nullptr), Diags(Diags) {
     initialize();
   }
+  ~Sema() { delete CurrentScope; }
 
   void initialize();
 
-  ModuleDeclaration *actOnModuleDeclaration(SMLoc Loc, StringRef Name);
+  std::unique_ptr<ModuleDeclaration> actOnModuleDeclaration(SMLoc Loc,
+                                                            StringRef Name);
   void actOnModuleDeclaration(ModuleDeclaration *ModDecl, SMLoc Loc,
                               StringRef Name, DeclList &Decls, StmtList &Stmts);
   void actOnImport(StringRef ModuleName, IdentList &Ids);
   void actOnConstantDeclaration(DeclList &Decls, SMLoc Loc, StringRef Name,
-                                Expr *E);
+                                std::unique_ptr<Expr> E);
   void actOnVariableDeclaration(DeclList &Decls, IdentList &Ids, Decl *D);
   void actOnFormalParameterDeclaration(FormalParamList &Params, IdentList &Ids,
                                        Decl *D, bool IsVar);
-  ProcedureDeclaration *actOnProcedureDeclaration(SMLoc Loc, StringRef Name);
+  std::unique_ptr<ProcedureDeclaration> actOnProcedureDeclaration(SMLoc Loc,
+                                                                  StringRef Name);
   void actOnProcedureHeading(ProcedureDeclaration *ProcDecl,
-                             FormalParamList &Params, Decl *RetType,
+                             FormalParamList Params, Decl *RetType,
                              SMLoc RetTypeLoc);
   void actOnProcedureDeclaration(ProcedureDeclaration *ProcDecl, SMLoc Loc,
                                  StringRef Name, DeclList &Decls,
                                  StmtList &Stmts);
-  void actOnAssignment(StmtList &Stmts, SMLoc Loc, Decl *D, Expr *E);
-  void actOnProcCall(StmtList &Stmts, SMLoc Loc, Decl *D, ExprList &Params);
-  void actOnIfStatement(StmtList &Stmts, SMLoc Loc, Expr *Cond,
-                        StmtList &IfStmts, StmtList &ElseStmts);
-  void actOnWhileStatement(StmtList &Stmts, SMLoc Loc, Expr *Cond,
-                           StmtList &WhileStmts);
-  void actOnReturnStatement(StmtList &Stmts, SMLoc Loc, Expr *RetVal);
+  void actOnAssignment(StmtList &Stmts, SMLoc Loc, Decl *D,
+                       std::unique_ptr<Expr> E);
+  void actOnProcCall(StmtList &Stmts, SMLoc Loc, Decl *D, ExprList Params);
+  void actOnIfStatement(StmtList &Stmts, SMLoc Loc, std::unique_ptr<Expr> Cond,
+                        StmtList IfStmts, StmtList ElseStmts);
+  void actOnWhileStatement(StmtList &Stmts, SMLoc Loc,
+                           std::unique_ptr<Expr> Cond, StmtList WhileStmts);
+  void actOnReturnStatement(StmtList &Stmts, SMLoc Loc,
+                            std::unique_ptr<Expr> RetVal);
 
-  Expr *actOnExpression(Expr *Left, Expr *Right, const OperatorInfo &Op);
-  Expr *actOnSimpleExpression(Expr *Left, Expr *Right, const OperatorInfo &Op);
-  Expr *actOnTerm(Expr *Left, Expr *Right, const OperatorInfo &Op);
-  Expr *actOnPrefixExpression(Expr *E, const OperatorInfo &Op);
-  Expr *actOnIntegerLiteral(SMLoc Loc, StringRef Literal);
-  Expr *actOnVariable(Decl *D);
-  Expr *actOnFunctionCall(SMLoc Loc, Decl *D, ExprList &Params);
+  std::unique_ptr<Expr> actOnExpression(std::unique_ptr<Expr> Left,
+                                        std::unique_ptr<Expr> Right,
+                                        const OperatorInfo &Op);
+  std::unique_ptr<Expr> actOnSimpleExpression(std::unique_ptr<Expr> Left,
+                                              std::unique_ptr<Expr> Right,
+                                              const OperatorInfo &Op);
+  std::unique_ptr<Expr> actOnTerm(std::unique_ptr<Expr> Left,
+                                  std::unique_ptr<Expr> Right,
+                                  const OperatorInfo &Op);
+  std::unique_ptr<Expr> actOnPrefixExpression(std::unique_ptr<Expr> E,
+                                              const OperatorInfo &Op);
+  std::unique_ptr<Expr> actOnIntegerLiteral(SMLoc Loc, StringRef Literal);
+  std::unique_ptr<Expr> actOnVariable(Decl *D);
+  std::unique_ptr<Expr> actOnFunctionCall(SMLoc Loc, Decl *D,
+                                          ExprList Params);
   Decl *actOnQualIdentPart(Decl *Prev, SMLoc Loc, StringRef Name);
 };
 

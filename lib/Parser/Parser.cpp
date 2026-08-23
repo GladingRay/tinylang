@@ -13,13 +13,13 @@ Parser::Parser(Lexer &Lex, Sema &Actions) : Lex(Lex), Actions(Actions) {
   advance();
 }
 
-ModuleDeclaration *Parser::parse() {
-  ModuleDeclaration *ModDecl = nullptr;
+std::unique_ptr<ModuleDeclaration> Parser::parse() {
+  std::unique_ptr<ModuleDeclaration> ModDecl;
   parseCompilationUnit(ModDecl);
   return ModDecl;
 }
 
-bool Parser::parseCompilationUnit(ModuleDeclaration *&D) {
+bool Parser::parseCompilationUnit(std::unique_ptr<ModuleDeclaration> &D) {
   auto _errorhandler = [this] { return skipUntil(); };
   if (consume(tok::kw_MODULE))
     return _errorhandler();
@@ -27,7 +27,7 @@ bool Parser::parseCompilationUnit(ModuleDeclaration *&D) {
     return _errorhandler();
   D = Actions.actOnModuleDeclaration(Tok.getLocation(), Tok.getIdentifier());
 
-  EnterDeclScope S(Actions, D);
+  EnterDeclScope S(Actions, D.get());
   advance();
   if (consume(tok::semi))
     return _errorhandler();
@@ -41,8 +41,8 @@ bool Parser::parseCompilationUnit(ModuleDeclaration *&D) {
     return _errorhandler();
   if (expect(tok::identifier))
     return _errorhandler();
-  Actions.actOnModuleDeclaration(D, Tok.getLocation(), Tok.getIdentifier(),
-                                 Decls, Stmts);
+  Actions.actOnModuleDeclaration(D.get(), Tok.getLocation(),
+                                 Tok.getIdentifier(), Decls, Stmts);
   advance();
   if (consume(tok::period))
     return _errorhandler();
@@ -133,11 +133,11 @@ bool Parser::parseConstantDeclaration(DeclList &Decls) {
   advance();
   if (expect(tok::equal))
     return _errorhandler();
-  Expr *E = nullptr;
+  std::unique_ptr<Expr> E;
   advance();
   if (parseExpression(E))
     return _errorhandler();
-  Actions.actOnConstantDeclaration(Decls, Loc, Name, E);
+  Actions.actOnConstantDeclaration(Decls, Loc, Name, std::move(E));
   return false;
 }
 
@@ -161,10 +161,10 @@ bool Parser::parseProcedureDeclaration(DeclList &ParentDecls) {
     return _errorhandler();
   if (expect(tok::identifier))
     return _errorhandler();
-  ProcedureDeclaration *D =
+  auto D =
       Actions.actOnProcedureDeclaration(Tok.getLocation(), Tok.getIdentifier());
 
-  EnterDeclScope S(Actions, D);
+  EnterDeclScope S(Actions, D.get());
   FormalParamList Params;
   Decl *RetType = nullptr;
   SMLoc RetTypeLoc;
@@ -173,7 +173,8 @@ bool Parser::parseProcedureDeclaration(DeclList &ParentDecls) {
     if (parseFormalParameters(Params, RetType, RetTypeLoc))
       return _errorhandler();
   }
-  Actions.actOnProcedureHeading(D, Params, RetType, RetTypeLoc);
+  Actions.actOnProcedureHeading(D.get(), std::move(Params), RetType,
+                                RetTypeLoc);
   if (expect(tok::semi))
     return _errorhandler();
   DeclList Decls;
@@ -183,10 +184,10 @@ bool Parser::parseProcedureDeclaration(DeclList &ParentDecls) {
     return _errorhandler();
   if (expect(tok::identifier))
     return _errorhandler();
-  Actions.actOnProcedureDeclaration(D, Tok.getLocation(), Tok.getIdentifier(),
-                                    Decls, Stmts);
+  Actions.actOnProcedureDeclaration(D.get(), Tok.getLocation(),
+                                    Tok.getIdentifier(), Decls, Stmts);
 
-  ParentDecls.push_back(D);
+  ParentDecls.push_back(std::move(D));
   advance();
   return false;
 }
@@ -260,7 +261,7 @@ bool Parser::parseStatement(StmtList &Stmts) {
   };
   if (Tok.is(tok::identifier)) {
     Decl *D;
-    Expr *E = nullptr;
+    std::unique_ptr<Expr> E;
     SMLoc Loc = Tok.getLocation();
     if (parseQualident(D))
       return _errorhandler();
@@ -268,7 +269,7 @@ bool Parser::parseStatement(StmtList &Stmts) {
       advance();
       if (parseExpression(E))
         return _errorhandler();
-      Actions.actOnAssignment(Stmts, Loc, D, E);
+      Actions.actOnAssignment(Stmts, Loc, D, std::move(E));
     } else if (Tok.is(tok::l_paren)) {
       ExprList Exprs;
       if (Tok.is(tok::l_paren)) {
@@ -281,7 +282,7 @@ bool Parser::parseStatement(StmtList &Stmts) {
         if (consume(tok::r_paren))
           return _errorhandler();
       }
-      Actions.actOnProcCall(Stmts, Loc, D, Exprs);
+      Actions.actOnProcCall(Stmts, Loc, D, std::move(Exprs));
     }
   } else if (Tok.is(tok::kw_IF)) {
     if (parseIfStatement(Stmts))
@@ -303,7 +304,7 @@ bool Parser::parseIfStatement(StmtList &Stmts) {
   auto _errorhandler = [this] {
     return skipUntil(tok::semi, tok::kw_ELSE, tok::kw_END);
   };
-  Expr *E = nullptr;
+  std::unique_ptr<Expr> E;
   StmtList IfStmts, ElseStmts;
   SMLoc Loc = Tok.getLocation();
   if (consume(tok::kw_IF))
@@ -321,7 +322,8 @@ bool Parser::parseIfStatement(StmtList &Stmts) {
   }
   if (expect(tok::kw_END))
     return _errorhandler();
-  Actions.actOnIfStatement(Stmts, Loc, E, IfStmts, ElseStmts);
+  Actions.actOnIfStatement(Stmts, Loc, std::move(E), std::move(IfStmts),
+                           std::move(ElseStmts));
   advance();
   return false;
 }
@@ -330,7 +332,7 @@ bool Parser::parseWhileStatement(StmtList &Stmts) {
   auto _errorhandler = [this] {
     return skipUntil(tok::semi, tok::kw_ELSE, tok::kw_END);
   };
-  Expr *E = nullptr;
+  std::unique_ptr<Expr> E;
   StmtList WhileStmts;
   SMLoc Loc = Tok.getLocation();
   if (consume(tok::kw_WHILE))
@@ -343,7 +345,8 @@ bool Parser::parseWhileStatement(StmtList &Stmts) {
     return _errorhandler();
   if (expect(tok::kw_END))
     return _errorhandler();
-  Actions.actOnWhileStatement(Stmts, Loc, E, WhileStmts);
+  Actions.actOnWhileStatement(Stmts, Loc, std::move(E),
+                              std::move(WhileStmts));
   advance();
   return false;
 }
@@ -352,7 +355,7 @@ bool Parser::parseReturnStatement(StmtList &Stmts) {
   auto _errorhandler = [this] {
     return skipUntil(tok::semi, tok::kw_ELSE, tok::kw_END);
   };
-  Expr *E = nullptr;
+  std::unique_ptr<Expr> E;
   SMLoc Loc = Tok.getLocation();
   if (consume(tok::kw_RETURN))
     return _errorhandler();
@@ -361,29 +364,29 @@ bool Parser::parseReturnStatement(StmtList &Stmts) {
     if (parseExpression(E))
       return _errorhandler();
   }
-  Actions.actOnReturnStatement(Stmts, Loc, E);
+  Actions.actOnReturnStatement(Stmts, Loc, std::move(E));
   return false;
 }
 
 bool Parser::parseExpList(ExprList &Exprs) {
   auto _errorhandler = [this] { return skipUntil(tok::r_paren); };
-  Expr *E = nullptr;
+  std::unique_ptr<Expr> E;
   if (parseExpression(E))
     return _errorhandler();
   if (E)
-    Exprs.push_back(E);
+    Exprs.push_back(std::move(E));
   while (Tok.is(tok::comma)) {
     E = nullptr;
     advance();
     if (parseExpression(E))
       return _errorhandler();
     if (E)
-      Exprs.push_back(E);
+      Exprs.push_back(std::move(E));
   }
   return false;
 }
 
-bool Parser::parseExpression(Expr *&E) {
+bool Parser::parseExpression(std::unique_ptr<Expr> &E) {
   auto _errorhandler = [this] {
     return skipUntil(tok::r_paren, tok::comma, tok::semi, tok::kw_DO,
                      tok::kw_ELSE, tok::kw_END, tok::kw_THEN);
@@ -393,12 +396,12 @@ bool Parser::parseExpression(Expr *&E) {
   if (Tok.isOneOf(tok::hash, tok::less, tok::lessequal, tok::equal,
                   tok::greater, tok::greaterequal)) {
     OperatorInfo Op;
-    Expr *Right = nullptr;
+    std::unique_ptr<Expr> Right;
     if (parseRelation(Op))
       return _errorhandler();
     if (parseSimpleExpression(Right))
       return _errorhandler();
-    E = Actions.actOnExpression(E, Right, Op);
+    E = Actions.actOnExpression(std::move(E), std::move(Right), Op);
   }
   return false;
 }
@@ -433,7 +436,7 @@ bool Parser::parseRelation(OperatorInfo &Op) {
   return false;
 }
 
-bool Parser::parseSimpleExpression(Expr *&E) {
+bool Parser::parseSimpleExpression(std::unique_ptr<Expr> &E) {
   auto _errorhandler = [this] {
     return skipUntil(tok::hash, tok::r_paren, tok::comma, tok::semi, tok::less,
                      tok::lessequal, tok::equal, tok::greater,
@@ -454,16 +457,16 @@ bool Parser::parseSimpleExpression(Expr *&E) {
     return _errorhandler();
   while (Tok.isOneOf(tok::plus, tok::minus, tok::kw_OR)) {
     OperatorInfo Op;
-    Expr *Right = nullptr;
+    std::unique_ptr<Expr> Right;
     if (parseAddOperator(Op))
       return _errorhandler();
     if (parseTerm(Right))
       return _errorhandler();
-    E = Actions.actOnSimpleExpression(E, Right, Op);
+    E = Actions.actOnSimpleExpression(std::move(E), std::move(Right), Op);
   }
   if (!PrefixOp.isUnspecified())
 
-    E = Actions.actOnPrefixExpression(E, PrefixOp);
+    E = Actions.actOnPrefixExpression(std::move(E), PrefixOp);
   return false;
 }
 
@@ -488,7 +491,7 @@ bool Parser::parseAddOperator(OperatorInfo &Op) {
   return false;
 }
 
-bool Parser::parseTerm(Expr *&E) {
+bool Parser::parseTerm(std::unique_ptr<Expr> &E) {
   auto _errorhandler = [this] {
     return skipUntil(tok::hash, tok::r_paren, tok::plus, tok::comma, tok::minus,
                      tok::semi, tok::less, tok::lessequal, tok::equal,
@@ -500,12 +503,12 @@ bool Parser::parseTerm(Expr *&E) {
   while (Tok.isOneOf(tok::star, tok::slash, tok::kw_AND, tok::kw_DIV,
                      tok::kw_MOD)) {
     OperatorInfo Op;
-    Expr *Right = nullptr;
+    std::unique_ptr<Expr> Right;
     if (parseMulOperator(Op))
       return _errorhandler();
     if (parseFactor(Right))
       return _errorhandler();
-    E = Actions.actOnTerm(E, Right, Op);
+    E = Actions.actOnTerm(std::move(E), std::move(Right), Op);
   }
   return false;
 }
@@ -537,7 +540,7 @@ bool Parser::parseMulOperator(OperatorInfo &Op) {
   return false;
 }
 
-bool Parser::parseFactor(Expr *&E) {
+bool Parser::parseFactor(std::unique_ptr<Expr> &E) {
   auto _errorhandler = [this] {
     return skipUntil(
         tok::hash, tok::r_paren, tok::star, tok::plus, tok::comma, tok::minus,
@@ -563,7 +566,7 @@ bool Parser::parseFactor(Expr *&E) {
       }
       if (expect(tok::r_paren))
         return _errorhandler();
-      E = Actions.actOnFunctionCall(Loc, D, Exprs);
+      E = Actions.actOnFunctionCall(Loc, D, std::move(Exprs));
       advance();
     } else if (Tok.isOneOf(tok::hash, tok::r_paren, tok::star, tok::plus,
                            tok::comma, tok::minus, tok::slash, tok::semi,
@@ -584,7 +587,7 @@ bool Parser::parseFactor(Expr *&E) {
     advance();
     if (parseFactor(E))
       return _errorhandler();
-    E = Actions.actOnPrefixExpression(E, Op);
+    E = Actions.actOnPrefixExpression(std::move(E), Op);
   } else {
     /*ERROR*/
     return _errorhandler();

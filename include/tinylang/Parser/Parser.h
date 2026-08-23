@@ -56,7 +56,7 @@ class Parser {
     }
   }
 
-  bool parseCompilationUnit(ModuleDeclaration *&D);
+  bool parseCompilationUnit(std::unique_ptr<ModuleDeclaration> &D);
   bool parseImport();
   bool parseBlock(DeclList &Decls, StmtList &Stmts);
   bool parseDeclaration(DeclList &Decls);
@@ -73,19 +73,19 @@ class Parser {
   bool parseWhileStatement(StmtList &Stmts);
   bool parseReturnStatement(StmtList &Stmts);
   bool parseExpList(ExprList &Exprs);
-  bool parseExpression(Expr *&E);
+  bool parseExpression(std::unique_ptr<Expr> &E);
   bool parseRelation(OperatorInfo &Op);
-  bool parseSimpleExpression(Expr *&E);
+  bool parseSimpleExpression(std::unique_ptr<Expr> &E);
   bool parseAddOperator(OperatorInfo &Op);
-  bool parseTerm(Expr *&E);
+  bool parseTerm(std::unique_ptr<Expr> &E);
   bool parseMulOperator(OperatorInfo &Op);
-  bool parseFactor(Expr *&E);
+  bool parseFactor(std::unique_ptr<Expr> &E);
   bool parseQualident(Decl *&D);
   bool parseIdentList(IdentList &Ids);
 
 public:
   Parser(Lexer &Lex, Sema &Actions);
 
-  ModuleDeclaration *parse();
+  std::unique_ptr<ModuleDeclaration> parse();
 };
 } // namespace tinylang
