@@ -6,6 +6,13 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   set(CMAKE_CXX_STANDARD 17)
   set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+  # Dump the LLVM IR to tinylang-dump-<N>.ll every time a phi node is
+  # created or updated.  This is only for debugging the SSA construction.
+  option(TINYLANG_ENABLE_IR_DUMP "Enable LLVM IR dumps around phi creation" OFF)
+  if(TINYLANG_ENABLE_IR_DUMP)
+    add_compile_definitions(TINYLANG_ENABLE_IR_DUMP)
+  endif()
+
   find_package(LLVM REQUIRED HINTS "${LLVM_CMAKE_PATH}")
   list(APPEND CMAKE_MODULE_PATH ${LLVM_DIR})
 

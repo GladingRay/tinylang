@@ -33,6 +33,13 @@ public:
 
   llvm::GlobalObject *getGlobal(Decl *D);
 
+  /// Writes the current LLVM IR to "tinylang-dump-<N>.ll", where N is a
+  /// monotonically increasing counter.  Intended for tracing how the IR
+  /// evolves while phi nodes are created and updated.  The call sites are
+  /// guarded by the TINYLANG_ENABLE_IR_DUMP macro (see CMake option
+  /// TINYLANG_ENABLE_IR_DUMP).
+  void dump();
+
   void run(ModuleDeclaration *Mod);
 };
 } // namespace tinylang

@@ -2,8 +2,17 @@
 #include "tinylang/CodeGen/CGProcedure.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace tinylang;
+
+#ifdef TINYLANG_ENABLE_IR_DUMP
+namespace {
+/// Counter used to give each dumped IR snapshot a unique file name.
+unsigned DumpFileCounter = 0;
+} // namespace
+#endif
 
 void CGModule::initialize() {
   VoidTy = llvm::Type::getVoidTy(getLLVMCtx());
@@ -34,6 +43,24 @@ std::string CGModule::mangleName(Decl *D) {
 }
 
 llvm::GlobalObject *CGModule::getGlobal(Decl *D) { return Globals[D]; }
+
+#ifdef TINYLANG_ENABLE_IR_DUMP
+void CGModule::dump() {
+  std::string FileName =
+      (llvm::Twine("tinylang-dump-") + llvm::Twine(DumpFileCounter++) +
+       ".ll")
+          .str();
+  std::error_code EC;
+  llvm::raw_fd_ostream OS(FileName, EC, llvm::sys::fs::OF_Text);
+  if (EC) {
+    llvm::errs() << "Error opening " << FileName << ": " << EC.message()
+                 << "\n";
+    return;
+  }
+  M->print(OS, nullptr);
+  OS.flush();
+}
+#endif
 
 void CGModule::run(ModuleDeclaration *Mod) {
   this->Mod = Mod;

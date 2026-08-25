@@ -50,10 +50,15 @@ CGProcedure::readLocalVariableRecursive(llvm::BasicBlock *BB, Decl *Decl) {
 }
 
 llvm::PHINode *CGProcedure::addEmptyPhi(llvm::BasicBlock *BB, Decl *Decl) {
-  return BB->empty()
-             ? llvm::PHINode::Create(mapType(Decl), 0, "", BB)
-             : llvm::PHINode::Create(mapType(Decl), 0, "",
-                                     BB->getFirstInsertionPt());
+  llvm::PHINode *Phi = BB->empty()
+                           ? llvm::PHINode::Create(mapType(Decl), 0, "", BB)
+                           : llvm::PHINode::Create(mapType(Decl), 0, "",
+                                                   BB->getFirstInsertionPt());
+#ifdef TINYLANG_ENABLE_IR_DUMP
+  // Snapshot the IR right after the (empty) phi node was created.
+  CGM.dump();
+#endif
+  return Phi;
 }
 
 llvm::Value *CGProcedure::addPhiOperands(llvm::BasicBlock *BB, Decl *D,
@@ -61,6 +66,10 @@ llvm::Value *CGProcedure::addPhiOperands(llvm::BasicBlock *BB, Decl *D,
   for (auto *PredBB : predecessors(BB)) {
     Phi->addIncoming(readLocalVariable(PredBB, D), PredBB);
   }
+#ifdef TINYLANG_ENABLE_IR_DUMP
+  // Snapshot the IR right after the phi node received its incoming values.
+  CGM.dump();
+#endif
   return optimizePhi(Phi);
 }
 
