@@ -170,11 +170,27 @@ CGProcedure::createFunctionType(ProcedureDeclaration *Proc) {
                                  /*IsVarArgs=*/false);
 }
 
+llvm::Function *CGProcedure::declareFunction(ProcedureDeclaration *Proc) {
+  llvm::FunctionType *FTy = createFunctionType(Proc);
+  return llvm::Function::Create(FTy, llvm::GlobalValue::ExternalLinkage,
+                                CGM.mangleName(Proc), CGM.getModule());
+}
+
+llvm::Function *CGProcedure::resolveFunction(ProcedureDeclaration *Proc) {
+  if (llvm::Function *Fn =
+          CGM.getModule()->getFunction(CGM.mangleName(Proc)))
+    return Fn;
+  return declareFunction(Proc);
+}
+
 llvm::Function *CGProcedure::createFunction(ProcedureDeclaration *Proc,
                                             llvm::FunctionType *FTy) {
-  llvm::Function *Fn =
-      llvm::Function::Create(Fty, llvm::GlobalValue::ExternalLinkage,
-                             CGM.mangleName(Proc), CGM.getModule());
+  // Reuse the declaration created by declareFunction() (if any) instead of
+  // inserting a second function with the same name.
+  llvm::Function *Fn = CGM.getModule()->getFunction(CGM.mangleName(Proc));
+  if (!Fn)
+    Fn = llvm::Function::Create(Fty, llvm::GlobalValue::ExternalLinkage,
+                                CGM.mangleName(Proc), CGM.getModule());
   // Give parameters a name.
   for (auto Pair : llvm::enumerate(Fn->args())) {
     llvm::Argument &Arg = Pair.value();
@@ -289,6 +305,13 @@ llvm::Value *CGProcedure::emitExpr(Expr *E) {
                  llvm::dyn_cast<BooleanLiteral>(E)) {
     return llvm::ConstantInt::get(CGM.Int1Ty,
                                   BoolLit->getValue());
+  } else if (auto *FuncCall = llvm::dyn_cast<FunctionCallExpr>(E)) {
+    ProcedureDeclaration *Proc = FuncCall->getDecl();
+    llvm::SmallVector<llvm::Value *, 8> Args;
+    for (auto &Arg : FuncCall->getParams())
+      Args.push_back(emitExpr(Arg.get()));
+    llvm::Function *Callee = resolveFunction(Proc);
+    return Builder.CreateCall(Callee->getFunctionType(), Callee, Args);
   }
   llvm::report_fatal_error("Unsupported expression");
 }
@@ -299,7 +322,12 @@ void CGProcedure::emitStmt(AssignmentStatement *Stmt) {
 }
 
 void CGProcedure::emitStmt(ProcedureCallStatement *Stmt) {
-  llvm::report_fatal_error("not implemented");
+  ProcedureDeclaration *Proc = Stmt->getProc();
+  llvm::SmallVector<llvm::Value *, 8> Args;
+  for (auto &Arg : Stmt->getParams())
+    Args.push_back(emitExpr(Arg.get()));
+  llvm::Function *Callee = resolveFunction(Proc);
+  Builder.CreateCall(Callee->getFunctionType(), Callee, Args);
 }
 
 void CGProcedure::emitStmt(IfStatement *Stmt) {
@@ -322,7 +350,7 @@ void CGProcedure::emitStmt(IfStatement *Stmt) {
 
   setCurr(IfBB);
   emit(Stmt->getIfStmts());
-  if (!Curr->getTerminator()) {
+  if (!Curr->getTerminatorOrNull()) {
     Builder.CreateBr(AfterIfBB);
   }
   sealBlock(Curr);
@@ -330,7 +358,7 @@ void CGProcedure::emitStmt(IfStatement *Stmt) {
   if (HasElse) {
     setCurr(ElseBB);
     emit(Stmt->getElseStmts());
-    if (!Curr->getTerminator()) {
+    if (!Curr->getTerminatorOrNull()) {
       Builder.CreateBr(AfterIfBB);
     }
     sealBlock(Curr);
@@ -421,7 +449,7 @@ void CGProcedure::run(ProcedureDeclaration *Proc) {
   }
 
   emit(Proc->getStmts());
-  if (!Curr->getTerminator()) {
+  if (!Curr->getTerminatorOrNull()) {
     Builder.CreateRetVoid();
   }
   sealBlock(Curr);

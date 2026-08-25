@@ -59,6 +59,10 @@ class CGProcedure {
 
   llvm::FunctionType *createFunctionType(ProcedureDeclaration *Proc);
 
+  /// Returns the llvm::Function implementing the given procedure,
+  /// declaring it on demand if it does not exist yet.
+  llvm::Function *resolveFunction(ProcedureDeclaration *Proc);
+
   llvm::Function *createFunction(ProcedureDeclaration *Proc,
                                  llvm::FunctionType *Fty);
 
@@ -89,6 +93,11 @@ protected:
 public:
   CGProcedure(CGModule &CGM)
       : CGM(CGM), Builder(CGM.getLLVMCtx()), Curr(nullptr) {}
+
+  /// Creates a declaration (signature without body) for the given
+  /// procedure in the current module, so that calls can reference it
+  /// before its body is emitted.
+  llvm::Function *declareFunction(ProcedureDeclaration *Proc);
 
   void run(ProcedureDeclaration *Proc);
 };

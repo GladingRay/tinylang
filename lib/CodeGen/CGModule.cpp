@@ -64,14 +64,24 @@ void CGModule::dump() {
 
 void CGModule::run(ModuleDeclaration *Mod) {
   this->Mod = Mod;
+  // First pass: emit module-level variables and declare all procedures so
+  // that calls can reference them regardless of declaration order (this also
+  // makes recursive and mutually recursive calls work).
   for (const auto &Decl : Mod->getDecls()) {
     if (auto *Var = llvm::dyn_cast<VariableDeclaration>(Decl.get())) {
+      llvm::Constant *Init =
+          llvm::ConstantInt::get(convertType(Var->getType()), 0);
       llvm::GlobalVariable *V = new llvm::GlobalVariable(
           *M, convertType(Var->getType()), false,
-          llvm::GlobalValue::PrivateLinkage, nullptr, mangleName(Var));
+          llvm::GlobalValue::PrivateLinkage, Init, mangleName(Var));
       Globals[Var] = V;
-    } else if (auto *Proc =
-                   llvm::dyn_cast<ProcedureDeclaration>(Decl.get())) {
+    } else if (auto *Proc = llvm::dyn_cast<ProcedureDeclaration>(Decl.get())) {
+      CGProcedure(*this).declareFunction(Proc);
+    }
+  }
+  // Second pass: emit the procedure bodies.
+  for (const auto &Decl : Mod->getDecls()) {
+    if (auto *Proc = llvm::dyn_cast<ProcedureDeclaration>(Decl.get())) {
       CGProcedure CGP(*this);
       CGP.run(Proc);
     }
