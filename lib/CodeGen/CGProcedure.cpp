@@ -1,4 +1,5 @@
 #include "tinylang/CodeGen/CGProcedure.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/Support/Casting.h"
@@ -332,16 +333,19 @@ void CGProcedure::emitStmt(ProcedureCallStatement *Stmt) {
 
 void CGProcedure::emitStmt(IfStatement *Stmt) {
   bool HasElse = Stmt->getElseStmts().size() > 0;
+  unsigned IfNo = CGM.IfCounter++;
 
   // Create the required basic blocks.
   llvm::BasicBlock *IfBB = llvm::BasicBlock::Create(
-      CGM.getLLVMCtx(), "if.body", Fn);
+      CGM.getLLVMCtx(), llvm::Twine("if.body.") + llvm::Twine(IfNo), Fn);
   llvm::BasicBlock *ElseBB =
       HasElse ? llvm::BasicBlock::Create(CGM.getLLVMCtx(),
-                                         "else.body", Fn)
+                                         llvm::Twine("else.body.") +
+                                             llvm::Twine(IfNo),
+                                         Fn)
               : nullptr;
   llvm::BasicBlock *AfterIfBB = llvm::BasicBlock::Create(
-      CGM.getLLVMCtx(), "after.if", Fn);
+      CGM.getLLVMCtx(), llvm::Twine("after.if.") + llvm::Twine(IfNo), Fn);
 
   llvm::Value *Cond = emitExpr(Stmt->getCond());
   Builder.CreateCondBr(Cond, IfBB,
@@ -367,15 +371,20 @@ void CGProcedure::emitStmt(IfStatement *Stmt) {
 }
 
 void CGProcedure::emitStmt(WhileStatement *Stmt) {
+  unsigned WhileNo = CGM.WhileCounter++;
+
   // The basic block for the condition.
   llvm::BasicBlock *WhileCondBB = llvm::BasicBlock::Create(
-      CGM.getLLVMCtx(), "while.cond", Fn);
+      CGM.getLLVMCtx(), llvm::Twine("while.cond.") + llvm::Twine(WhileNo),
+      Fn);
   // The basic block for the while body.
   llvm::BasicBlock *WhileBodyBB = llvm::BasicBlock::Create(
-      CGM.getLLVMCtx(), "while.body", Fn);
+      CGM.getLLVMCtx(), llvm::Twine("while.body.") + llvm::Twine(WhileNo),
+      Fn);
   // The basic block after the while statement.
   llvm::BasicBlock *AfterWhileBB = llvm::BasicBlock::Create(
-      CGM.getLLVMCtx(), "after.while", Fn);
+      CGM.getLLVMCtx(), llvm::Twine("after.while.") + llvm::Twine(WhileNo),
+      Fn);
 
   Builder.CreateBr(WhileCondBB);
   sealBlock(Curr);

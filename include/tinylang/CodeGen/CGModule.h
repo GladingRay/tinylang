@@ -17,6 +17,12 @@ public:
   llvm::Type *Int64Ty;
   llvm::Constant *Int32Zero;
 
+  /// Counters used to generate unique basic block names for if and while
+  /// statements.  Each counter is incremented when the corresponding
+  /// statement is emitted, keeping block names unique across the module.
+  unsigned IfCounter = 0;
+  unsigned WhileCounter = 0;
+
 public:
   CGModule(llvm::Module *M) : M(M), Mod(nullptr) { initialize(); }
 
