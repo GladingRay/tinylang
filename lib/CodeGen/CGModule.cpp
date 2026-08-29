@@ -23,6 +23,10 @@ void CGModule::initialize() {
 }
 
 llvm::Type *CGModule::convertType(TypeDeclaration *Ty) {
+  if (auto *ArrTy = llvm::dyn_cast<ArrayTypeDeclaration>(Ty))
+    return llvm::ArrayType::get(
+        convertType(ArrTy->getElementType()),
+        static_cast<uint64_t>(ArrTy->getNumElements()));
   if (Ty->getName() == "INTEGER")
     return Int64Ty;
   if (Ty->getName() == "BOOLEAN")
@@ -69,10 +73,12 @@ void CGModule::run(ModuleDeclaration *Mod) {
   // makes recursive and mutually recursive calls work).
   for (const auto &Decl : Mod->getDecls()) {
     if (auto *Var = llvm::dyn_cast<VariableDeclaration>(Decl.get())) {
-      llvm::Constant *Init =
-          llvm::ConstantInt::get(convertType(Var->getType()), 0);
+      llvm::Type *Ty = convertType(Var->getType());
+      llvm::Constant *Init = Ty->isAggregateType()
+                                 ? llvm::ConstantAggregateZero::get(Ty)
+                                 : llvm::ConstantInt::get(Ty, 0);
       llvm::GlobalVariable *V = new llvm::GlobalVariable(
-          *M, convertType(Var->getType()), false,
+          *M, Ty, false,
           llvm::GlobalValue::PrivateLinkage, Init, mangleName(Var));
       Globals[Var] = V;
     } else if (auto *Proc = llvm::dyn_cast<ProcedureDeclaration>(Decl.get())) {

@@ -51,9 +51,14 @@ CGProcedure::readLocalVariableRecursive(llvm::BasicBlock *BB, Decl *Decl) {
 }
 
 llvm::PHINode *CGProcedure::addEmptyPhi(llvm::BasicBlock *BB, Decl *Decl) {
+  // Aggregates (arrays) are kept in memory; the phi must be of pointer type
+  // so that it can be used as a getelementptr base.
+  llvm::Type *Ty = mapType(Decl);
+  if (Ty->isAggregateType())
+    Ty = llvm::PointerType::get(CGM.getLLVMCtx(), /*AddressSpace=*/0);
   llvm::PHINode *Phi = BB->empty()
-                           ? llvm::PHINode::Create(mapType(Decl), 0, "", BB)
-                           : llvm::PHINode::Create(mapType(Decl), 0, "",
+                           ? llvm::PHINode::Create(Ty, 0, "", BB)
+                           : llvm::PHINode::Create(Ty, 0, "",
                                                    BB->getFirstInsertionPt());
 #ifdef TINYLANG_ENABLE_IR_DUMP
   // Snapshot the IR right after the (empty) phi node was created.
@@ -131,12 +136,18 @@ llvm::Value *CGProcedure::readVariable(llvm::BasicBlock *BB, Decl *D) {
     if (V->getEnclosingDecl() == Proc)
       return readLocalVariable(BB, D);
     else if (V->getEnclosingDecl() == CGM.getModuleDeclaration()) {
-      return Builder.CreateLoad(mapType(D), CGM.getGlobal(D));
+      llvm::Type *Ty = mapType(D);
+      if (Ty->isAggregateType())
+        return CGM.getGlobal(D); // arrays: the address of the global
+      return Builder.CreateLoad(Ty, CGM.getGlobal(D));
     } else
       llvm::report_fatal_error("Nested procedures not yet supported");
   } else if (auto *FP = llvm::dyn_cast<FormalParameterDeclaration>(D)) {
     if (FP->isVar()) {
-      return Builder.CreateLoad(mapType(FP, false), FormalParams[FP]);
+      llvm::Type *Ty = mapType(FP, false);
+      if (Ty->isAggregateType())
+        return FormalParams[FP]; // arrays: the address of the argument
+      return Builder.CreateLoad(Ty, FormalParams[FP]);
     } else
       return readLocalVariable(BB, D);
   } else
@@ -313,13 +324,35 @@ llvm::Value *CGProcedure::emitExpr(Expr *E) {
       Args.push_back(emitExpr(Arg.get()));
     llvm::Function *Callee = resolveFunction(Proc);
     return Builder.CreateCall(Callee->getFunctionType(), Callee, Args);
+  } else if (auto *Idx = llvm::dyn_cast<IndexedExpression>(E)) {
+    auto *ArrTy = llvm::cast<ArrayTypeDeclaration>(Idx->getBase()->getType());
+    llvm::Value *Addr = emitLValue(Idx);
+    if (llvm::isa<ArrayTypeDeclaration>(ArrTy->getElementType()))
+      return Addr; // address of the sub-array (multi-dimensional arrays)
+    return Builder.CreateLoad(CGM.convertType(ArrTy->getElementType()), Addr);
   }
   llvm::report_fatal_error("Unsupported expression");
 }
 
+llvm::Value *CGProcedure::emitLValue(IndexedExpression *E) {
+  auto *ArrTy = llvm::cast<ArrayTypeDeclaration>(E->getBase()->getType());
+  llvm::Value *Base = emitExpr(E->getBase());
+  llvm::Value *Index = emitExpr(E->getIndex());
+  // Normalize the (inclusive) Modula-2 subrange to a zero-based LLVM index.
+  Index = Builder.CreateSub(Index, Builder.getInt64(ArrTy->getLowBound()));
+  llvm::Type *ArrLLVMTy = CGM.convertType(ArrTy);
+  return Builder.CreateGEP(ArrLLVMTy, Base, {Builder.getInt64(0), Index});
+}
+
 void CGProcedure::emitStmt(AssignmentStatement *Stmt) {
   auto *Val = emitExpr(Stmt->getExpr());
-  writeVariable(Curr, Stmt->getVar(), Val);
+  if (auto *Var = llvm::dyn_cast<VariableAccess>(Stmt->getTarget())) {
+    writeVariable(Curr, Var->getDecl(), Val);
+  } else if (auto *Idx = llvm::dyn_cast<IndexedExpression>(Stmt->getTarget())) {
+    Builder.CreateStore(Val, emitLValue(Idx));
+  } else {
+    llvm::report_fatal_error("Unsupported assignment target");
+  }
 }
 
 void CGProcedure::emitStmt(ProcedureCallStatement *Stmt) {

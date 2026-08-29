@@ -76,6 +76,9 @@ void ASTDumper::dumpDecl(Decl *D) {
   case Decl::DK_Type:
     dumpType(cast<TypeDeclaration>(D));
     break;
+  case Decl::DK_ArrayType:
+    dumpType(cast<ArrayTypeDeclaration>(D));
+    break;
   case Decl::DK_Var:
     dumpVariable(cast<VariableDeclaration>(D));
     break;
@@ -98,19 +101,37 @@ void ASTDumper::dumpConstant(ConstantDeclaration *C) {
 
 void ASTDumper::dumpType(TypeDeclaration *T) {
   printIndent();
-  OS << "TypeDeclaration '" << T->getName() << "'\n";
+  if (auto *ArrTy = dyn_cast<ArrayTypeDeclaration>(T)) {
+    OS << "ArrayTypeDeclaration [ " << ArrTy->getLowBound() << " .. "
+       << ArrTy->getHighBound() << " ] OF ";
+    dumpTypeName(ArrTy->getElementType());
+    OS << "\n";
+  } else {
+    OS << "TypeDeclaration '" << T->getName() << "'\n";
+  }
+}
+
+void ASTDumper::dumpTypeName(TypeDeclaration *T) {
+  if (auto *ArrTy = dyn_cast<ArrayTypeDeclaration>(T)) {
+    OS << "ARRAY [" << ArrTy->getLowBound() << ".." << ArrTy->getHighBound()
+       << "] OF ";
+    dumpTypeName(ArrTy->getElementType());
+  } else {
+    OS << T->getName();
+  }
 }
 
 void ASTDumper::dumpVariable(VariableDeclaration *V) {
   printIndent();
-  OS << "VariableDeclaration '" << V->getName() << "' : "
-     << V->getType()->getName() << "\n";
+  OS << "VariableDeclaration '" << V->getName() << "' : ";
+  dumpTypeName(V->getType());
+  OS << "\n";
 }
 
 void ASTDumper::dumpFormalParameter(FormalParameterDeclaration *P) {
   printIndent();
-  OS << "FormalParameterDeclaration '" << P->getName() << "' : "
-     << P->getType()->getName();
+  OS << "FormalParameterDeclaration '" << P->getName() << "' : ";
+  dumpTypeName(P->getType());
   if (P->isVar())
     OS << " (VAR)";
   OS << "\n";
@@ -130,8 +151,10 @@ void ASTDumper::dumpFormalParams(const FormalParamList &Params) {
 void ASTDumper::dumpProcedure(ProcedureDeclaration *P) {
   printIndent();
   OS << "ProcedureDeclaration '" << P->getName() << "'";
-  if (P->getRetType())
-    OS << " : " << P->getRetType()->getName();
+  if (P->getRetType()) {
+    OS << " : ";
+    dumpTypeName(P->getRetType());
+  }
   OS << "\n";
   ++Indent;
   dumpFormalParams(P->getFormalParams());
@@ -165,7 +188,10 @@ void ASTDumper::dumpAssignment(AssignmentStatement *S) {
   OS << "AssignmentStatement\n";
   ++Indent;
   printIndent();
-  OS << "Target: '" << S->getVar()->getName() << "'\n";
+  OS << "Target:\n";
+  ++Indent;
+  dumpExpr(S->getTarget());
+  --Indent;
   printIndent();
   OS << "Value:\n";
   ++Indent;
@@ -241,13 +267,18 @@ void ASTDumper::dumpExpr(Expr *E) {
   case Expr::EK_Func:
     dumpFuncCall(cast<FunctionCallExpr>(E));
     break;
+  case Expr::EK_Indexed:
+    dumpIndexedExpression(cast<IndexedExpression>(E));
+    break;
   }
 }
 
 void ASTDumper::dumpInfix(InfixExpression *E) {
   printIndent();
   OS << "InfixExpression '" << getOperatorSpelling(E->getOperatorInfo().getKind())
-     << "' : " << E->getType()->getName() << "\n";
+     << "' : ";
+  dumpTypeName(E->getType());
+  OS << "\n";
   ++Indent;
   dumpExpr(E->getLeft());
   dumpExpr(E->getRight());
@@ -258,7 +289,9 @@ void ASTDumper::dumpPrefix(PrefixExpression *E) {
   printIndent();
   OS << "PrefixExpression '"
      << getOperatorSpelling(E->getOperatorInfo().getKind())
-     << "' : " << E->getType()->getName() << "\n";
+     << "' : ";
+  dumpTypeName(E->getType());
+  OS << "\n";
   ++Indent;
   dumpExpr(E->getExpr());
   --Indent;
@@ -268,32 +301,49 @@ void ASTDumper::dumpIntLiteral(IntegerLiteral *E) {
   printIndent();
   OS << "IntegerLiteral ";
   E->getValue().print(OS, /*IsSigned=*/true);
-  OS << " : " << E->getType()->getName() << "\n";
+  OS << " : ";
+  dumpTypeName(E->getType());
+  OS << "\n";
 }
 
 void ASTDumper::dumpBoolLiteral(BooleanLiteral *E) {
   printIndent();
-  OS << "BooleanLiteral " << (E->getValue() ? "true" : "false") << " : "
-     << E->getType()->getName() << "\n";
+  OS << "BooleanLiteral " << (E->getValue() ? "true" : "false") << " : ";
+  dumpTypeName(E->getType());
+  OS << "\n";
 }
 
 void ASTDumper::dumpVariableAccess(VariableAccess *E) {
   printIndent();
-  OS << "VariableAccess '" << E->getDecl()->getName() << "' : "
-     << E->getType()->getName() << "\n";
+  OS << "VariableAccess '" << E->getDecl()->getName() << "' : ";
+  dumpTypeName(E->getType());
+  OS << "\n";
 }
 
 void ASTDumper::dumpConstantAccess(ConstantAccess *E) {
   printIndent();
-  OS << "ConstantAccess '" << E->getDecl()->getName() << "' : "
-     << E->getType()->getName() << "\n";
+  OS << "ConstantAccess '" << E->getDecl()->getName() << "' : ";
+  dumpTypeName(E->getType());
+  OS << "\n";
 }
 
 void ASTDumper::dumpFuncCall(FunctionCallExpr *E) {
   printIndent();
-  OS << "FunctionCallExpr '" << E->getDecl()->getName() << "' : "
-     << E->getType()->getName() << "\n";
+  OS << "FunctionCallExpr '" << E->getDecl()->getName() << "' : ";
+  dumpTypeName(E->getType());
+  OS << "\n";
   ++Indent;
   dumpExprList("Arguments", E->getParams());
+  --Indent;
+}
+
+void ASTDumper::dumpIndexedExpression(IndexedExpression *E) {
+  printIndent();
+  OS << "IndexedExpression : ";
+  dumpTypeName(E->getType());
+  OS << "\n";
+  ++Indent;
+  dumpExpr(E->getBase());
+  dumpExpr(E->getIndex());
   --Indent;
 }

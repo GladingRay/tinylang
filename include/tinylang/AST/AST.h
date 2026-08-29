@@ -4,6 +4,7 @@
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SMLoc.h"
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
@@ -37,7 +38,15 @@ using IdentList = std::vector<std::pair<SMLoc, StringRef>>;
 
 class Decl {
 public:
-  enum DeclKind { DK_Module, DK_Const, DK_Type, DK_Var, DK_Param, DK_Proc };
+  enum DeclKind {
+    DK_Module,
+    DK_Const,
+    DK_Type,
+    DK_ArrayType,
+    DK_Var,
+    DK_Param,
+    DK_Proc
+  };
 
 private:
   const DeclKind Kind;
@@ -93,11 +102,40 @@ public:
 };
 
 class TypeDeclaration : public Decl {
+protected:
+  TypeDeclaration(DeclKind Kind, Decl *EnclosingDecl, SMLoc Loc,
+                  StringRef Name)
+      : Decl(Kind, EnclosingDecl, Loc, Name) {}
+
 public:
   TypeDeclaration(Decl *EnclosingDecl, SMLoc Loc, StringRef Name)
-      : Decl(DK_Type, EnclosingDecl, Loc, Name) {}
+      : TypeDeclaration(DK_Type, EnclosingDecl, Loc, Name) {}
 
-  static bool classof(const Decl *D) { return D->getKind() == DK_Type; }
+  static bool classof(const Decl *D) {
+    return D->getKind() == DK_Type || D->getKind() == DK_ArrayType;
+  }
+};
+
+/// A static array type, e.g. ARRAY [1..10] OF INTEGER.  The element type is
+/// referenced (not owned); bounds are inclusive and fixed at compile time.
+class ArrayTypeDeclaration : public TypeDeclaration {
+  TypeDeclaration *ElementType;
+  int64_t LowBound;
+  int64_t HighBound;
+
+public:
+  ArrayTypeDeclaration(Decl *EnclosingDecl, SMLoc Loc, StringRef Name,
+                       TypeDeclaration *ElementType, int64_t LowBound,
+                       int64_t HighBound)
+      : TypeDeclaration(DK_ArrayType, EnclosingDecl, Loc, Name),
+        ElementType(ElementType), LowBound(LowBound), HighBound(HighBound) {}
+
+  TypeDeclaration *getElementType() { return ElementType; }
+  int64_t getLowBound() const { return LowBound; }
+  int64_t getHighBound() const { return HighBound; }
+  int64_t getNumElements() const { return HighBound - LowBound + 1; }
+
+  static bool classof(const Decl *D) { return D->getKind() == DK_ArrayType; }
 };
 
 class VariableDeclaration : public Decl {
@@ -182,6 +220,7 @@ public:
     EK_Var,
     EK_Const,
     EK_Func,
+    EK_Indexed,
   };
 
 private:
@@ -298,6 +337,22 @@ public:
   static bool classof(const Expr *E) { return E->getKind() == EK_Func; }
 };
 
+class IndexedExpression : public Expr {
+  std::unique_ptr<Expr> Base;
+  std::unique_ptr<Expr> Index;
+
+public:
+  IndexedExpression(std::unique_ptr<Expr> Base, std::unique_ptr<Expr> Index,
+                    TypeDeclaration *Ty)
+      : Expr(EK_Indexed, Ty, false), Base(std::move(Base)),
+        Index(std::move(Index)) {}
+
+  Expr *getBase() { return Base.get(); }
+  Expr *getIndex() { return Index.get(); }
+
+  static bool classof(const Expr *E) { return E->getKind() == EK_Indexed; }
+};
+
 class Stmt {
 public:
   enum StmtKind { SK_Assign, SK_ProcCall, SK_If, SK_While, SK_Return };
@@ -314,14 +369,14 @@ public:
 };
 
 class AssignmentStatement : public Stmt {
-  Decl *Var;
+  std::unique_ptr<Expr> Target;
   std::unique_ptr<Expr> E;
 
 public:
-  AssignmentStatement(Decl *Var, std::unique_ptr<Expr> E)
-      : Stmt(SK_Assign), Var(Var), E(std::move(E)) {}
+  AssignmentStatement(std::unique_ptr<Expr> Target, std::unique_ptr<Expr> E)
+      : Stmt(SK_Assign), Target(std::move(Target)), E(std::move(E)) {}
 
-  Decl *getVar() { return Var; }
+  Expr *getTarget() { return Target.get(); }
   Expr *getExpr() { return E.get(); }
 
   static bool classof(const Stmt *S) { return S->getKind() == SK_Assign; }

@@ -149,9 +149,61 @@ bool Parser::parseVariableDeclaration(DeclList &Decls) {
     return _errorhandler();
   if (consume(tok::colon))
     return _errorhandler();
-  if (parseQualident(D))
+  if (parseType(D))
     return _errorhandler();
   Actions.actOnVariableDeclaration(Decls, Ids, D);
+  return false;
+}
+
+bool Parser::parseType(Decl *&D) {
+  auto _errorhandler = [this] { return skipUntil(tok::semi); };
+  if (!Tok.is(tok::kw_ARRAY))
+    return parseQualident(D);
+
+  SMLoc Loc = Tok.getLocation();
+  advance(); // ARRAY
+
+  // Collect all index ranges: [low..high] (, [low..high])*
+  std::vector<std::unique_ptr<Expr>> Lows, Highs;
+  while (true) {
+    if (consume(tok::l_bracket))
+      return _errorhandler();
+    std::unique_ptr<Expr> Low, High;
+    if (parseExpression(Low))
+      return _errorhandler();
+    if (consume(tok::dotdot))
+      return _errorhandler();
+    if (parseExpression(High))
+      return _errorhandler();
+    if (consume(tok::r_bracket))
+      return _errorhandler();
+    Lows.push_back(std::move(Low));
+    Highs.push_back(std::move(High));
+    if (!Tok.is(tok::comma))
+      break;
+    advance();
+  }
+
+  if (consume(tok::kw_OF))
+    return _errorhandler();
+  Decl *ElemDecl = nullptr;
+  if (parseType(ElemDecl))
+    return _errorhandler();
+  TypeDeclaration *ElemTy = dyn_cast_or_null<TypeDeclaration>(ElemDecl);
+  if (!ElemTy) {
+    getDiagnostics().report(Loc, diag::err_vardecl_requires_type);
+    return _errorhandler();
+  }
+
+  // Build nested array types from the innermost dimension outwards:
+  // ARRAY [1..2], [3..4] OF T  ==  ARRAY [1..2] OF ARRAY [3..4] OF T
+  TypeDeclaration *Ty = ElemTy;
+  for (size_t I = Lows.size(); I > 0; --I) {
+    size_t J = I - 1;
+    Ty = Actions.actOnArrayType(Loc, std::move(Lows[J]), std::move(Highs[J]),
+                                Ty);
+  }
+  D = Ty;
   return false;
 }
 
@@ -237,7 +289,7 @@ bool Parser::parseFormalParameter(FormalParamList &Params) {
     return _errorhandler();
   if (consume(tok::colon))
     return _errorhandler();
-  if (parseQualident(D))
+  if (parseType(D))
     return _errorhandler();
   Actions.actOnFormalParameterDeclaration(Params, Ids, D, IsVar);
   return false;
@@ -261,16 +313,11 @@ bool Parser::parseStatement(StmtList &Stmts) {
   };
   if (Tok.is(tok::identifier)) {
     Decl *D;
-    std::unique_ptr<Expr> E;
+    std::unique_ptr<Expr> E, Target;
     SMLoc Loc = Tok.getLocation();
     if (parseQualident(D))
       return _errorhandler();
-    if (Tok.is(tok::colonequal)) {
-      advance();
-      if (parseExpression(E))
-        return _errorhandler();
-      Actions.actOnAssignment(Stmts, Loc, D, std::move(E));
-    } else if (Tok.is(tok::l_paren)) {
+    if (Tok.is(tok::l_paren)) {
       ExprList Exprs;
       if (Tok.is(tok::l_paren)) {
         advance();
@@ -283,6 +330,27 @@ bool Parser::parseStatement(StmtList &Stmts) {
           return _errorhandler();
       }
       Actions.actOnProcCall(Stmts, Loc, D, std::move(Exprs));
+    } else {
+      // Designator on the left-hand side, possibly indexed: a, a[i], m[i][j].
+      Target = Actions.actOnVariable(D);
+      while (Tok.is(tok::l_bracket)) {
+        SMLoc IdxLoc = Tok.getLocation();
+        std::unique_ptr<Expr> Index;
+        advance();
+        if (parseExpression(Index))
+          return _errorhandler();
+        if (expect(tok::r_bracket))
+          return _errorhandler();
+        Target = Actions.actOnIndexedExpression(IdxLoc, std::move(Target),
+                                                std::move(Index));
+        advance();
+      }
+      if (Tok.is(tok::colonequal)) {
+        advance();
+        if (parseExpression(E))
+          return _errorhandler();
+        Actions.actOnAssignment(Stmts, Loc, std::move(Target), std::move(E));
+      }
     }
   } else if (Tok.is(tok::kw_IF)) {
     if (parseIfStatement(Stmts))
@@ -568,13 +636,20 @@ bool Parser::parseFactor(std::unique_ptr<Expr> &E) {
         return _errorhandler();
       E = Actions.actOnFunctionCall(Loc, D, std::move(Exprs));
       advance();
-    } else if (Tok.isOneOf(tok::hash, tok::r_paren, tok::star, tok::plus,
-                           tok::comma, tok::minus, tok::slash, tok::semi,
-                           tok::less, tok::lessequal, tok::equal, tok::greater,
-                           tok::greaterequal, tok::kw_AND, tok::kw_DIV,
-                           tok::kw_DO, tok::kw_ELSE, tok::kw_END, tok::kw_MOD,
-                           tok::kw_OR, tok::kw_THEN)) {
+    } else {
       E = Actions.actOnVariable(D);
+      while (Tok.is(tok::l_bracket)) {
+        SMLoc IdxLoc = Tok.getLocation();
+        std::unique_ptr<Expr> Index;
+        advance();
+        if (parseExpression(Index))
+          return _errorhandler();
+        if (expect(tok::r_bracket))
+          return _errorhandler();
+        E = Actions.actOnIndexedExpression(IdxLoc, std::move(E),
+                                           std::move(Index));
+        advance();
+      }
     }
   } else if (Tok.is(tok::l_paren)) {
     advance();

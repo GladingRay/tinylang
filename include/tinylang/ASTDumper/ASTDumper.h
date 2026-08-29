@@ -25,6 +25,7 @@ class ASTDumper {
   void dumpModule(ModuleDeclaration *M);
   void dumpConstant(ConstantDeclaration *C);
   void dumpType(TypeDeclaration *T);
+  void dumpTypeName(TypeDeclaration *T);
   void dumpVariable(VariableDeclaration *V);
   void dumpFormalParameter(FormalParameterDeclaration *P);
   void dumpFormalParams(const FormalParamList &Params);
@@ -43,6 +44,7 @@ class ASTDumper {
   void dumpVariableAccess(VariableAccess *E);
   void dumpConstantAccess(ConstantAccess *E);
   void dumpFuncCall(FunctionCallExpr *E);
+  void dumpIndexedExpression(IndexedExpression *E);
 
 public:
   ASTDumper(llvm::raw_ostream &OS) : OS(OS), Indent(0) {}

@@ -62,6 +62,7 @@ class Parser {
   bool parseDeclaration(DeclList &Decls);
   bool parseConstantDeclaration(DeclList &Decls);
   bool parseVariableDeclaration(DeclList &Decls);
+  bool parseType(Decl *&D);
   bool parseProcedureDeclaration(DeclList &ParentDecls);
   bool parseFormalParameters(FormalParamList &Params, Decl *&RetType,
                              SMLoc &RetTypeLoc);

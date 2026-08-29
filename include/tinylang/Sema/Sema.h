@@ -14,6 +14,8 @@ class Sema {
 
   bool isOperatorForType(tok::TokenKind Op, TypeDeclaration *Ty);
 
+  bool isSameType(TypeDeclaration *LHS, TypeDeclaration *RHS);
+
   void checkFormalAndActualParameters(SMLoc Loc, const FormalParamList &Formals,
                                       const ExprList &Actuals);
 
@@ -25,6 +27,8 @@ class Sema {
   std::unique_ptr<TypeDeclaration> BooleanType;
   std::unique_ptr<ConstantDeclaration> TrueConst;
   std::unique_ptr<ConstantDeclaration> FalseConst;
+  /// Anonymous array types created while parsing type declarations.
+  std::vector<std::unique_ptr<TypeDeclaration>> OwnedTypes;
 
 public:
   Sema(DiagnosticsEngine &Diags)
@@ -42,6 +46,9 @@ public:
   void actOnImport(StringRef ModuleName, IdentList &Ids);
   void actOnConstantDeclaration(DeclList &Decls, SMLoc Loc, StringRef Name,
                                 std::unique_ptr<Expr> E);
+  TypeDeclaration *actOnArrayType(SMLoc Loc, std::unique_ptr<Expr> Low,
+                                  std::unique_ptr<Expr> High,
+                                  TypeDeclaration *ElementType);
   void actOnVariableDeclaration(DeclList &Decls, IdentList &Ids, Decl *D);
   void actOnFormalParameterDeclaration(FormalParamList &Params, IdentList &Ids,
                                        Decl *D, bool IsVar);
@@ -53,8 +60,8 @@ public:
   void actOnProcedureDeclaration(ProcedureDeclaration *ProcDecl, SMLoc Loc,
                                  StringRef Name, DeclList &Decls,
                                  StmtList &Stmts);
-  void actOnAssignment(StmtList &Stmts, SMLoc Loc, Decl *D,
-                       std::unique_ptr<Expr> E);
+  void actOnAssignment(StmtList &Stmts, SMLoc Loc,
+                       std::unique_ptr<Expr> Target, std::unique_ptr<Expr> E);
   void actOnProcCall(StmtList &Stmts, SMLoc Loc, Decl *D, ExprList Params);
   void actOnIfStatement(StmtList &Stmts, SMLoc Loc, std::unique_ptr<Expr> Cond,
                         StmtList IfStmts, StmtList ElseStmts);
@@ -76,6 +83,9 @@ public:
                                               const OperatorInfo &Op);
   std::unique_ptr<Expr> actOnIntegerLiteral(SMLoc Loc, StringRef Literal);
   std::unique_ptr<Expr> actOnVariable(Decl *D);
+  std::unique_ptr<Expr> actOnIndexedExpression(SMLoc Loc,
+                                               std::unique_ptr<Expr> Base,
+                                               std::unique_ptr<Expr> Index);
   std::unique_ptr<Expr> actOnFunctionCall(SMLoc Loc, Decl *D,
                                           ExprList Params);
   Decl *actOnQualIdentPart(Decl *Prev, SMLoc Loc, StringRef Name);

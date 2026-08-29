@@ -78,6 +78,8 @@ protected:
 
   llvm::Value *emitExpr(Expr *E);
 
+  llvm::Value *emitLValue(IndexedExpression *E);
+
   void emitStmt(AssignmentStatement *Stmt);
 
   void emitStmt(ProcedureCallStatement *Stmt);

@@ -10,6 +10,23 @@ static StringRef getOperatorSpelling(tok::TokenKind Kind) {
   return tok::getKeywordSpelling(Kind);
 }
 
+static bool evalConstInt(Expr *E, int64_t &Value) {
+  if (auto *Lit = dyn_cast_or_null<IntegerLiteral>(E)) {
+    Value = Lit->getValue().getSExtValue();
+    return true;
+  }
+  if (auto *Pre = dyn_cast_or_null<PrefixExpression>(E)) {
+    if (Pre->getOperatorInfo().getKind() == tok::minus) {
+      int64_t Operand;
+      if (evalConstInt(Pre->getExpr(), Operand)) {
+        Value = -Operand;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 void Sema::enterScope(Decl *D) {
   CurrentScope = new Scope(CurrentScope);
   CurrentDecl = D;
@@ -42,6 +59,17 @@ bool Sema::isOperatorForType(tok::TokenKind Op, TypeDeclaration *Ty) {
   }
 }
 
+bool Sema::isSameType(TypeDeclaration *LHS, TypeDeclaration *RHS) {
+  if (LHS == RHS)
+    return true;
+  if (auto *LArr = dyn_cast<ArrayTypeDeclaration>(LHS))
+    if (auto *RArr = dyn_cast<ArrayTypeDeclaration>(RHS))
+      return LArr->getLowBound() == RArr->getLowBound() &&
+             LArr->getHighBound() == RArr->getHighBound() &&
+             isSameType(LArr->getElementType(), RArr->getElementType());
+  return false;
+}
+
 void Sema::checkFormalAndActualParameters(SMLoc Loc,
                                           const FormalParamList &Formals,
                                           const ExprList &Actuals) {
@@ -55,7 +83,7 @@ void Sema::checkFormalAndActualParameters(SMLoc Loc,
     Expr *Arg = A->get();
     if (!Arg)
       continue;
-    if (F->getType() != Arg->getType())
+    if (!isSameType(F->getType(), Arg->getType()))
       Diags.report(
           Loc, diag::err_type_of_formal_and_actual_parameter_not_compatible);
     if (F->isVar() && !isa<VariableAccess>(Arg))
@@ -115,6 +143,27 @@ void Sema::actOnConstantDeclaration(DeclList &Decls, SMLoc Loc, StringRef Name,
     Diags.report(Loc, diag::err_symbold_declared, Name);
 }
 
+TypeDeclaration *Sema::actOnArrayType(SMLoc Loc, std::unique_ptr<Expr> Low,
+                                      std::unique_ptr<Expr> High,
+                                      TypeDeclaration *ElementType) {
+  int64_t LowBound = 0;
+  int64_t HighBound = 0;
+  if (!evalConstInt(Low.get(), LowBound) ||
+      !evalConstInt(High.get(), HighBound)) {
+    Diags.report(Loc, diag::err_array_bound_not_constant);
+    LowBound = HighBound = 0;
+  }
+  if (LowBound > HighBound) {
+    Diags.report(Loc, diag::err_array_bound_invalid);
+    HighBound = LowBound;
+  }
+  auto ArrTy = std::make_unique<ArrayTypeDeclaration>(
+      CurrentDecl, Loc, StringRef(), ElementType, LowBound, HighBound);
+  TypeDeclaration *Result = ArrTy.get();
+  OwnedTypes.push_back(std::move(ArrTy));
+  return Result;
+}
+
 void Sema::actOnVariableDeclaration(DeclList &Decls, IdentList &Ids, Decl *D) {
   assert(CurrentScope && "CurrentScope not set");
   if (!D)
@@ -141,6 +190,11 @@ void Sema::actOnFormalParameterDeclaration(FormalParamList &Params,
   if (!D)
     return;
   if (TypeDeclaration *Ty = dyn_cast<TypeDeclaration>(D)) {
+    if (!IsVar && isa<ArrayTypeDeclaration>(Ty)) {
+      if (!Ids.empty())
+        Diags.report(Ids.front().first, diag::err_array_param_requires_var);
+      return;
+    }
     for (auto &[Loc, Name] : Ids) {
       auto Decl = std::make_unique<FormalParameterDeclaration>(
           CurrentDecl, Loc, Name, Ty, IsVar);
@@ -187,24 +241,37 @@ void Sema::actOnProcedureDeclaration(ProcedureDeclaration *ProcDecl, SMLoc Loc,
   ProcDecl->setStmts(std::move(Stmts));
 }
 
-void Sema::actOnAssignment(StmtList &Stmts, SMLoc Loc, Decl *D,
+void Sema::actOnAssignment(StmtList &Stmts, SMLoc Loc,
+                           std::unique_ptr<Expr> Target,
                            std::unique_ptr<Expr> E) {
-  if (!D || !E)
+  if (!Target || !E)
     return;
   TypeDeclaration *Ty = nullptr;
-  if (auto *Var = dyn_cast<VariableDeclaration>(D))
-    Ty = Var->getType();
-  else if (auto *FP = dyn_cast<FormalParameterDeclaration>(D))
-    Ty = FP->getType();
-  else {
-    // TODO Emit error
+  if (auto *Var = dyn_cast<VariableAccess>(Target.get())) {
+    Decl *D = Var->getDecl();
+    if (auto *VD = dyn_cast<VariableDeclaration>(D))
+      Ty = VD->getType();
+    else if (auto *FP = dyn_cast<FormalParameterDeclaration>(D))
+      Ty = FP->getType();
+    else {
+      // TODO Emit error
+      return;
+    }
+  } else if (auto *Idx = dyn_cast<IndexedExpression>(Target.get())) {
+    Ty = Idx->getType();
+  } else {
     return;
   }
-  if (Ty != E->getType()) {
+  if (isa<ArrayTypeDeclaration>(Ty)) {
+    Diags.report(Loc, diag::err_array_assignment_not_supported);
+    return;
+  }
+  if (!isSameType(Ty, E->getType())) {
     Diags.report(Loc, diag::err_types_for_operator_not_compatible,
                  getOperatorSpelling(tok::colonequal));
   }
-  Stmts.push_back(std::make_unique<AssignmentStatement>(D, std::move(E)));
+  Stmts.push_back(
+      std::make_unique<AssignmentStatement>(std::move(Target), std::move(E)));
 }
 
 void Sema::actOnProcCall(StmtList &Stmts, SMLoc Loc, Decl *D,
@@ -395,6 +462,23 @@ std::unique_ptr<Expr> Sema::actOnVariable(Decl *D) {
   else if (auto *C = dyn_cast<ConstantDeclaration>(D))
     return std::make_unique<ConstantAccess>(C);
   return nullptr;
+}
+
+std::unique_ptr<Expr> Sema::actOnIndexedExpression(SMLoc Loc,
+                                                   std::unique_ptr<Expr> Base,
+                                                   std::unique_ptr<Expr> Index) {
+  if (!Base || !Index)
+    return nullptr;
+  auto *ArrTy = dyn_cast<ArrayTypeDeclaration>(Base->getType());
+  if (!ArrTy) {
+    Diags.report(Loc, diag::err_indexed_expression_requires_array);
+    return nullptr;
+  }
+  if (Index->getType() != IntegerType.get()) {
+    Diags.report(Loc, diag::err_index_expression_must_be_integer);
+  }
+  return std::make_unique<IndexedExpression>(
+      std::move(Base), std::move(Index), ArrTy->getElementType());
 }
 
 std::unique_ptr<Expr> Sema::actOnFunctionCall(SMLoc Loc, Decl *D,

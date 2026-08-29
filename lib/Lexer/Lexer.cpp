@@ -82,9 +82,10 @@ void Lexer::next(Token &Result) {
       CASE('*', tok::star);
       CASE('/', tok::slash);
       CASE(',', tok::comma);
-      CASE('.', tok::period);
       CASE(';', tok::semi);
       CASE(')', tok::r_paren);
+      CASE('[', tok::l_bracket);
+      CASE(']', tok::r_bracket);
 #undef CASE
     case '(':
       if (*(CurPtr + 1) == '*') {
@@ -92,6 +93,12 @@ void Lexer::next(Token &Result) {
         next(Result);
       } else
         formToken(Result, CurPtr + 1, tok::l_paren);
+      break;
+    case '.':
+      if (*(CurPtr + 1) == '.')
+        formToken(Result, CurPtr + 2, tok::dotdot);
+      else
+        formToken(Result, CurPtr + 1, tok::period);
       break;
     case ':':
       if (*(CurPtr + 1) == '=')
