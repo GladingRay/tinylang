@@ -64,6 +64,8 @@ class Parser {
   bool parseTypeDeclaration(DeclList &Decls);
   bool parseVariableDeclaration(DeclList &Decls);
   bool parseType(Decl *&D);
+  bool parseRecordType(Decl *&D);
+  bool parseFieldList(DeclList &Fields);
   bool parseProcedureDeclaration(DeclList &ParentDecls);
   bool parseFormalParameters(FormalParamList &Params, Decl *&RetType,
                              SMLoc &RetTypeLoc);
@@ -83,6 +85,7 @@ class Parser {
   bool parseMulOperator(OperatorInfo &Op);
   bool parseFactor(std::unique_ptr<Expr> &E);
   bool parseQualident(Decl *&D);
+  bool parseDesignator(std::unique_ptr<Expr> &E);
   bool parseIdentList(IdentList &Ids);
 
 public:

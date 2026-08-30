@@ -185,6 +185,8 @@ bool Parser::parseVariableDeclaration(DeclList &Decls) {
 
 bool Parser::parseType(Decl *&D) {
   auto _errorhandler = [this] { return skipUntil(tok::semi); };
+  if (Tok.is(tok::kw_RECORD))
+    return parseRecordType(D);
   if (!Tok.is(tok::kw_ARRAY))
     return parseQualident(D);
 
@@ -232,6 +234,39 @@ bool Parser::parseType(Decl *&D) {
                                 Ty);
   }
   D = Ty;
+  return false;
+}
+
+bool Parser::parseRecordType(Decl *&D) {
+  auto _errorhandler = [this] { return skipUntil(tok::kw_END); };
+  SMLoc Loc = Tok.getLocation();
+  advance(); // RECORD
+  DeclList Fields;
+  if (parseFieldList(Fields))
+    return _errorhandler();
+  if (expect(tok::kw_END))
+    return _errorhandler();
+  D = Actions.actOnRecordType(Loc, std::move(Fields));
+  advance();
+  return false;
+}
+
+bool Parser::parseFieldList(DeclList &Fields) {
+  auto _errorhandler = [this] { return skipUntil(tok::kw_END); };
+  while (Tok.is(tok::identifier)) {
+    IdentList Ids;
+    Decl *D = nullptr;
+    if (parseIdentList(Ids))
+      return _errorhandler();
+    if (consume(tok::colon))
+      return _errorhandler();
+    if (parseType(D))
+      return _errorhandler();
+    Actions.actOnFieldDeclaration(Fields, Ids, D);
+    if (!Tok.is(tok::semi))
+      break;
+    advance();
+  }
   return false;
 }
 
@@ -359,20 +394,11 @@ bool Parser::parseStatement(StmtList &Stmts) {
       }
       Actions.actOnProcCall(Stmts, Loc, D, std::move(Exprs));
     } else {
-      // Designator on the left-hand side, possibly indexed: a, a[i], m[i][j].
+      // Designator on the left-hand side, possibly indexed and/or a record
+      // field: a, a[i], r.f, a[i].f, r.f[i].
       Target = Actions.actOnVariable(D);
-      while (Tok.is(tok::l_bracket)) {
-        SMLoc IdxLoc = Tok.getLocation();
-        std::unique_ptr<Expr> Index;
-        advance();
-        if (parseExpression(Index))
-          return _errorhandler();
-        if (expect(tok::r_bracket))
-          return _errorhandler();
-        Target = Actions.actOnIndexedExpression(IdxLoc, std::move(Target),
-                                                std::move(Index));
-        advance();
-      }
+      if (parseDesignator(Target))
+        return _errorhandler();
       if (Tok.is(tok::colonequal)) {
         advance();
         if (parseExpression(E))
@@ -666,18 +692,8 @@ bool Parser::parseFactor(std::unique_ptr<Expr> &E) {
       advance();
     } else {
       E = Actions.actOnVariable(D);
-      while (Tok.is(tok::l_bracket)) {
-        SMLoc IdxLoc = Tok.getLocation();
-        std::unique_ptr<Expr> Index;
-        advance();
-        if (parseExpression(Index))
-          return _errorhandler();
-        if (expect(tok::r_bracket))
-          return _errorhandler();
-        E = Actions.actOnIndexedExpression(IdxLoc, std::move(E),
-                                           std::move(Index));
-        advance();
-      }
+      if (parseDesignator(E))
+        return _errorhandler();
     }
   } else if (Tok.is(tok::l_paren)) {
     advance();
@@ -718,6 +734,31 @@ bool Parser::parseQualident(Decl *&D) {
       return _errorhandler();
     D = Actions.actOnQualIdentPart(D, Tok.getLocation(), Tok.getIdentifier());
     advance();
+  }
+  return false;
+}
+
+bool Parser::parseDesignator(std::unique_ptr<Expr> &E) {
+  while (Tok.isOneOf(tok::period, tok::l_bracket)) {
+    if (Tok.is(tok::l_bracket)) {
+      SMLoc IdxLoc = Tok.getLocation();
+      std::unique_ptr<Expr> Index;
+      advance();
+      if (parseExpression(Index))
+        return true;
+      if (expect(tok::r_bracket))
+        return true;
+      E = Actions.actOnIndexedExpression(IdxLoc, std::move(E),
+                                         std::move(Index));
+      advance();
+    } else {
+      advance(); // period
+      if (expect(tok::identifier))
+        return true;
+      E = Actions.actOnFieldAccess(Tok.getLocation(), std::move(E),
+                                   Tok.getIdentifier());
+      advance();
+    }
   }
   return false;
 }

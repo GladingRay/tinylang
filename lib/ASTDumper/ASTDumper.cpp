@@ -82,6 +82,9 @@ void ASTDumper::dumpDecl(Decl *D) {
   case Decl::DK_TypeAlias:
     dumpTypeAlias(cast<TypeAliasDeclaration>(D));
     break;
+  case Decl::DK_RecordType:
+    dumpRecordType(cast<RecordTypeDeclaration>(D));
+    break;
   case Decl::DK_Var:
     dumpVariable(cast<VariableDeclaration>(D));
     break;
@@ -121,11 +124,30 @@ void ASTDumper::dumpTypeAlias(TypeAliasDeclaration *T) {
   OS << "\n";
 }
 
+void ASTDumper::dumpRecordType(RecordTypeDeclaration *T) {
+  printIndent();
+  OS << "RecordTypeDeclaration\n";
+  ++Indent;
+  dumpDeclList("Fields", T->getFields());
+  --Indent;
+}
+
 void ASTDumper::dumpTypeName(TypeDeclaration *T) {
   if (auto *ArrTy = dyn_cast<ArrayTypeDeclaration>(T)) {
     OS << "ARRAY [" << ArrTy->getLowBound() << ".." << ArrTy->getHighBound()
        << "] OF ";
     dumpTypeName(ArrTy->getElementType());
+  } else if (auto *RecTy = dyn_cast<RecordTypeDeclaration>(T)) {
+    OS << "RECORD (";
+    bool First = true;
+    for (const auto &F : RecTy->getFields()) {
+      if (!First)
+        OS << "; ";
+      First = false;
+      OS << F->getName() << ": ";
+      dumpTypeName(cast<VariableDeclaration>(F.get())->getType());
+    }
+    OS << ")";
   } else if (auto *Alias = dyn_cast<TypeAliasDeclaration>(T)) {
     OS << Alias->getName();
   } else {
@@ -282,6 +304,9 @@ void ASTDumper::dumpExpr(Expr *E) {
   case Expr::EK_Indexed:
     dumpIndexedExpression(cast<IndexedExpression>(E));
     break;
+  case Expr::EK_Field:
+    dumpFieldAccess(cast<FieldAccess>(E));
+    break;
   }
 }
 
@@ -357,5 +382,15 @@ void ASTDumper::dumpIndexedExpression(IndexedExpression *E) {
   ++Indent;
   dumpExpr(E->getBase());
   dumpExpr(E->getIndex());
+  --Indent;
+}
+
+void ASTDumper::dumpFieldAccess(FieldAccess *E) {
+  printIndent();
+  OS << "FieldAccess '" << E->getField()->getName() << "' : ";
+  dumpTypeName(E->getType());
+  OS << "\n";
+  ++Indent;
+  dumpExpr(E->getBase());
   --Indent;
 }

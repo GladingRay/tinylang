@@ -1,7 +1,9 @@
 #include "tinylang/CodeGen/CGModule.h"
 #include "tinylang/CodeGen/CGProcedure.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -28,6 +30,14 @@ llvm::Type *CGModule::convertType(TypeDeclaration *Ty) {
     return llvm::ArrayType::get(
         convertType(ArrTy->getElementType()),
         static_cast<uint64_t>(ArrTy->getNumElements()));
+  if (auto *RecTy = llvm::dyn_cast<RecordTypeDeclaration>(Ty)) {
+    llvm::SmallVector<llvm::Type *, 8> FieldTypes;
+    for (const auto &F : RecTy->getFields())
+      FieldTypes.push_back(
+          convertType(llvm::cast<VariableDeclaration>(F.get())->getType()));
+    return llvm::StructType::get(getLLVMCtx(), FieldTypes,
+                                 /*isPacked=*/false);
+  }
   if (Ty->getName() == "INTEGER")
     return Int64Ty;
   if (Ty->getName() == "BOOLEAN")

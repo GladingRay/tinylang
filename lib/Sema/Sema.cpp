@@ -89,7 +89,9 @@ void Sema::checkFormalAndActualParameters(SMLoc Loc,
     if (!isSameType(F->getType(), Arg->getType()))
       Diags.report(
           Loc, diag::err_type_of_formal_and_actual_parameter_not_compatible);
-    if (F->isVar() && !isa<VariableAccess>(Arg))
+    bool IsLValue = isa<VariableAccess>(Arg) || isa<IndexedExpression>(Arg) ||
+                    isa<FieldAccess>(Arg);
+    if (F->isVar() && !IsLValue)
       Diags.report(Loc, diag::err_var_parameter_requires_var);
   }
 }
@@ -183,6 +185,14 @@ TypeDeclaration *Sema::actOnArrayType(SMLoc Loc, std::unique_ptr<Expr> Low,
   return Result;
 }
 
+TypeDeclaration *Sema::actOnRecordType(SMLoc Loc, DeclList Fields) {
+  auto RecTy = std::make_unique<RecordTypeDeclaration>(
+      CurrentDecl, Loc, StringRef(), std::move(Fields));
+  TypeDeclaration *Result = RecTy.get();
+  OwnedTypes.push_back(std::move(RecTy));
+  return Result;
+}
+
 void Sema::actOnVariableDeclaration(DeclList &Decls, IdentList &Ids, Decl *D) {
   assert(CurrentScope && "CurrentScope not set");
   if (!D)
@@ -199,6 +209,33 @@ void Sema::actOnVariableDeclaration(DeclList &Decls, IdentList &Ids, Decl *D) {
   } else if (!Ids.empty()) {
     SMLoc Loc = Ids.front().first;
     Diags.report(Loc, diag::err_vardecl_requires_type);
+  }
+}
+
+void Sema::actOnFieldDeclaration(DeclList &Fields, IdentList &Ids, Decl *D) {
+  assert(CurrentScope && "CurrentScope not set");
+  if (!D)
+    return;
+  TypeDeclaration *Ty = dyn_cast<TypeDeclaration>(D);
+  if (!Ty) {
+    if (!Ids.empty())
+      Diags.report(Ids.front().first, diag::err_vardecl_requires_type);
+    return;
+  }
+  for (auto &[Loc, Name] : Ids) {
+    bool Duplicate = false;
+    for (const auto &F : Fields) {
+      if (F->getName() == Name) {
+        Duplicate = true;
+        break;
+      }
+    }
+    if (Duplicate) {
+      Diags.report(Loc, diag::err_symbold_declared, Name);
+      continue;
+    }
+    Fields.push_back(
+        std::make_unique<VariableDeclaration>(CurrentDecl, Loc, Name, Ty));
   }
 }
 
@@ -243,8 +280,12 @@ void Sema::actOnProcedureHeading(ProcedureDeclaration *ProcDecl,
   auto *RetTypeDecl = dyn_cast_or_null<TypeDeclaration>(RetType);
   if (!RetTypeDecl && RetType)
     Diags.report(RetTypeLoc, diag::err_returntype_must_be_type);
-  else
+  else if (RetTypeDecl) {
+    TypeDeclaration *UT = getUnderlyingType(RetTypeDecl);
+    if (isa<ArrayTypeDeclaration>(UT) || isa<RecordTypeDeclaration>(UT))
+      Diags.report(RetTypeLoc, diag::err_aggregate_return_not_supported);
     ProcDecl->setRetType(RetTypeDecl);
+  }
 }
 
 void Sema::actOnProcedureDeclaration(ProcedureDeclaration *ProcDecl, SMLoc Loc,
@@ -278,6 +319,8 @@ void Sema::actOnAssignment(StmtList &Stmts, SMLoc Loc,
     }
   } else if (auto *Idx = dyn_cast<IndexedExpression>(Target.get())) {
     Ty = Idx->getType();
+  } else if (auto *Field = dyn_cast<FieldAccess>(Target.get())) {
+    Ty = Field->getType();
   } else {
     return;
   }
@@ -499,6 +542,23 @@ std::unique_ptr<Expr> Sema::actOnIndexedExpression(SMLoc Loc,
   }
   return std::make_unique<IndexedExpression>(
       std::move(Base), std::move(Index), ArrTy->getElementType());
+}
+
+std::unique_ptr<Expr> Sema::actOnFieldAccess(SMLoc Loc,
+                                             std::unique_ptr<Expr> Base,
+                                             StringRef Name) {
+  if (!Base)
+    return nullptr;
+  auto *RecTy =
+      dyn_cast<RecordTypeDeclaration>(getUnderlyingType(Base->getType()));
+  if (!RecTy) {
+    Diags.report(Loc, diag::err_field_access_requires_record);
+    return nullptr;
+  }
+  if (VariableDeclaration *Field = RecTy->lookupField(Name))
+    return std::make_unique<FieldAccess>(std::move(Base), Field);
+  Diags.report(Loc, diag::err_undeclared_field, Name);
+  return nullptr;
 }
 
 std::unique_ptr<Expr> Sema::actOnFunctionCall(SMLoc Loc, Decl *D,

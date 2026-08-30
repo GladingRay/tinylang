@@ -78,7 +78,11 @@ protected:
 
   llvm::Value *emitExpr(Expr *E);
 
+  llvm::Value *emitLValue(Expr *E);
   llvm::Value *emitLValue(IndexedExpression *E);
+  llvm::Value *emitLValue(FieldAccess *E);
+
+  void emitMemCpy(llvm::Value *Dst, llvm::Value *Src, llvm::Type *Ty);
 
   void emitStmt(AssignmentStatement *Stmt);
 

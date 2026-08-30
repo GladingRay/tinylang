@@ -51,7 +51,9 @@ public:
   TypeDeclaration *actOnArrayType(SMLoc Loc, std::unique_ptr<Expr> Low,
                                   std::unique_ptr<Expr> High,
                                   TypeDeclaration *ElementType);
+  TypeDeclaration *actOnRecordType(SMLoc Loc, DeclList Fields);
   void actOnVariableDeclaration(DeclList &Decls, IdentList &Ids, Decl *D);
+  void actOnFieldDeclaration(DeclList &Fields, IdentList &Ids, Decl *D);
   void actOnFormalParameterDeclaration(FormalParamList &Params, IdentList &Ids,
                                        Decl *D, bool IsVar);
   std::unique_ptr<ProcedureDeclaration> actOnProcedureDeclaration(SMLoc Loc,
@@ -88,6 +90,9 @@ public:
   std::unique_ptr<Expr> actOnIndexedExpression(SMLoc Loc,
                                                std::unique_ptr<Expr> Base,
                                                std::unique_ptr<Expr> Index);
+  std::unique_ptr<Expr> actOnFieldAccess(SMLoc Loc,
+                                         std::unique_ptr<Expr> Base,
+                                         StringRef Name);
   std::unique_ptr<Expr> actOnFunctionCall(SMLoc Loc, Decl *D,
                                           ExprList Params);
   Decl *actOnQualIdentPart(Decl *Prev, SMLoc Loc, StringRef Name);

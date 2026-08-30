@@ -1,6 +1,7 @@
 #include "tinylang/CodeGen/CGProcedure.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ModRef.h"
@@ -320,8 +321,17 @@ llvm::Value *CGProcedure::emitExpr(Expr *E) {
   } else if (auto *FuncCall = llvm::dyn_cast<FunctionCallExpr>(E)) {
     ProcedureDeclaration *Proc = FuncCall->getDecl();
     llvm::SmallVector<llvm::Value *, 8> Args;
-    for (auto &Arg : FuncCall->getParams())
-      Args.push_back(emitExpr(Arg.get()));
+    const ExprList &Actuals = FuncCall->getParams();
+    for (size_t I = 0; I < Actuals.size(); ++I) {
+      llvm::Value *V = emitExpr(Actuals[I].get());
+      FormalParameterDeclaration *FP = Proc->getFormalParams()[I].get();
+      if (!FP->isVar()) {
+        llvm::Type *Ty = mapType(FP);
+        if (Ty->isAggregateType())
+          V = Builder.CreateLoad(Ty, V);
+      }
+      Args.push_back(V);
+    }
     llvm::Function *Callee = resolveFunction(Proc);
     return Builder.CreateCall(Callee->getFunctionType(), Callee, Args);
   } else if (auto *Idx = llvm::dyn_cast<IndexedExpression>(E)) {
@@ -332,8 +342,40 @@ llvm::Value *CGProcedure::emitExpr(Expr *E) {
             getUnderlyingType(ArrTy->getElementType())))
       return Addr; // address of the sub-array (multi-dimensional arrays)
     return Builder.CreateLoad(CGM.convertType(ArrTy->getElementType()), Addr);
+  } else if (auto *Field = llvm::dyn_cast<FieldAccess>(E)) {
+    llvm::Value *Addr = emitLValue(Field);
+    llvm::Type *FieldTy = CGM.convertType(Field->getField()->getType());
+    if (FieldTy->isAggregateType())
+      return Addr; // address of the record/array field
+    return Builder.CreateLoad(FieldTy, Addr);
   }
   llvm::report_fatal_error("Unsupported expression");
+}
+
+llvm::Value *CGProcedure::emitLValue(Expr *E) {
+  if (auto *Var = llvm::dyn_cast<VariableAccess>(E)) {
+    Decl *D = Var->getDecl();
+    if (auto *V = llvm::dyn_cast<VariableDeclaration>(D)) {
+      if (V->getEnclosingDecl() == Proc)
+        return readLocalVariable(Curr, D);
+      if (V->getEnclosingDecl() == CGM.getModuleDeclaration())
+        return CGM.getGlobal(D);
+      llvm::report_fatal_error("Nested procedures not yet supported");
+    }
+    if (auto *FP = llvm::dyn_cast<FormalParameterDeclaration>(D)) {
+      if (FP->isVar())
+        return FormalParams[FP];
+      llvm::Type *Ty = mapType(FP);
+      if (Ty->isAggregateType())
+        return readLocalVariable(Curr, D);
+      llvm::report_fatal_error("Cannot take address of scalar value parameter");
+    }
+  } else if (auto *Idx = llvm::dyn_cast<IndexedExpression>(E)) {
+    return emitLValue(Idx);
+  } else if (auto *Field = llvm::dyn_cast<FieldAccess>(E)) {
+    return emitLValue(Field);
+  }
+  llvm::report_fatal_error("Unsupported lvalue");
 }
 
 llvm::Value *CGProcedure::emitLValue(IndexedExpression *E) {
@@ -347,12 +389,51 @@ llvm::Value *CGProcedure::emitLValue(IndexedExpression *E) {
   return Builder.CreateGEP(ArrLLVMTy, Base, {Builder.getInt64(0), Index});
 }
 
+llvm::Value *CGProcedure::emitLValue(FieldAccess *E) {
+  llvm::Value *Base = emitExpr(E->getBase());
+  auto *RecTy = llvm::cast<RecordTypeDeclaration>(
+      getUnderlyingType(E->getBase()->getType()));
+  unsigned Index = 0;
+  for (const auto &F : RecTy->getFields()) {
+    if (F.get() == E->getField())
+      break;
+    ++Index;
+  }
+  llvm::Type *RecLLVMTy = CGM.convertType(RecTy);
+  return Builder.CreateGEP(RecLLVMTy, Base,
+                           {Builder.getInt32(0), Builder.getInt32(Index)});
+}
+
+void CGProcedure::emitMemCpy(llvm::Value *Dst, llvm::Value *Src,
+                             llvm::Type *Ty) {
+  const llvm::DataLayout &DL = CGM.getModule()->getDataLayout();
+  llvm::Align A = DL.getABITypeAlign(Ty);
+  Builder.CreateMemCpy(Dst, A, Src, A, DL.getTypeStoreSize(Ty));
+}
+
 void CGProcedure::emitStmt(AssignmentStatement *Stmt) {
-  auto *Val = emitExpr(Stmt->getExpr());
   if (auto *Var = llvm::dyn_cast<VariableAccess>(Stmt->getTarget())) {
-    writeVariable(Curr, Var->getDecl(), Val);
+    llvm::Type *Ty = CGM.convertType(Var->getType());
+    if (Ty->isAggregateType()) {
+      emitMemCpy(emitLValue(Var), emitExpr(Stmt->getExpr()), Ty);
+      return;
+    }
+    writeVariable(Curr, Var->getDecl(), emitExpr(Stmt->getExpr()));
   } else if (auto *Idx = llvm::dyn_cast<IndexedExpression>(Stmt->getTarget())) {
-    Builder.CreateStore(Val, emitLValue(Idx));
+    llvm::Type *Ty = CGM.convertType(Idx->getType());
+    if (Ty->isAggregateType()) {
+      emitMemCpy(emitLValue(Idx), emitExpr(Stmt->getExpr()), Ty);
+      return;
+    }
+    Builder.CreateStore(emitExpr(Stmt->getExpr()), emitLValue(Idx));
+  } else if (auto *Field =
+                 llvm::dyn_cast<FieldAccess>(Stmt->getTarget())) {
+    llvm::Type *Ty = CGM.convertType(Field->getType());
+    if (Ty->isAggregateType()) {
+      emitMemCpy(emitLValue(Field), emitExpr(Stmt->getExpr()), Ty);
+      return;
+    }
+    Builder.CreateStore(emitExpr(Stmt->getExpr()), emitLValue(Field));
   } else {
     llvm::report_fatal_error("Unsupported assignment target");
   }
@@ -361,8 +442,17 @@ void CGProcedure::emitStmt(AssignmentStatement *Stmt) {
 void CGProcedure::emitStmt(ProcedureCallStatement *Stmt) {
   ProcedureDeclaration *Proc = Stmt->getProc();
   llvm::SmallVector<llvm::Value *, 8> Args;
-  for (auto &Arg : Stmt->getParams())
-    Args.push_back(emitExpr(Arg.get()));
+  const ExprList &Actuals = Stmt->getParams();
+  for (size_t I = 0; I < Actuals.size(); ++I) {
+    llvm::Value *V = emitExpr(Actuals[I].get());
+    FormalParameterDeclaration *FP = Proc->getFormalParams()[I].get();
+    if (!FP->isVar()) {
+      llvm::Type *Ty = mapType(FP);
+      if (Ty->isAggregateType())
+        V = Builder.CreateLoad(Ty, V);
+    }
+    Args.push_back(V);
+  }
   llvm::Function *Callee = resolveFunction(Proc);
   Builder.CreateCall(Callee->getFunctionType(), Callee, Args);
 }
@@ -476,10 +566,21 @@ void CGProcedure::run(ProcedureDeclaration *Proc) {
     llvm::Argument *Arg = &Pair.value();
     FormalParameterDeclaration *FP =
         Proc->getFormalParams()[Pair.index()].get();
-    // Create mapping FormalParameter -> llvm::Argument for
-    // VAR parameters.
-    FormalParams[FP] = Arg;
-    writeLocalVariable(Curr, FP, Arg);
+    llvm::Type *Ty = mapType(FP);
+    if (FP->isVar()) {
+      // Create mapping FormalParameter -> llvm::Argument for
+      // VAR parameters.
+      FormalParams[FP] = Arg;
+      writeLocalVariable(Curr, FP, Arg);
+    } else if (Ty->isAggregateType()) {
+      // Aggregate value parameters are copied into an alloca so that field
+      // access can use the same pointer-based path as local records/arrays.
+      llvm::Value *Addr = Builder.CreateAlloca(Ty);
+      Builder.CreateStore(Arg, Addr);
+      writeLocalVariable(Curr, FP, Addr);
+    } else {
+      writeLocalVariable(Curr, FP, Arg);
+    }
   }
 
   for (const auto &D : Proc->getDecls()) {

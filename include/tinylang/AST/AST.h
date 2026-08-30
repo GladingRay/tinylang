@@ -45,6 +45,7 @@ public:
     DK_Type,
     DK_ArrayType,
     DK_TypeAlias,
+    DK_RecordType,
     DK_Var,
     DK_Param,
     DK_Proc
@@ -115,7 +116,7 @@ public:
 
   static bool classof(const Decl *D) {
     return D->getKind() == DK_Type || D->getKind() == DK_ArrayType ||
-           D->getKind() == DK_TypeAlias;
+           D->getKind() == DK_TypeAlias || D->getKind() == DK_RecordType;
   }
 };
 
@@ -178,6 +179,33 @@ public:
   TypeDeclaration *getType() { return Ty; }
 
   static bool classof(const Decl *D) { return D->getKind() == DK_Var; }
+};
+
+/// A record type, e.g. RECORD x, y: INTEGER END.  Field declarations are
+/// owned by the record type and are only reachable through field access.
+class RecordTypeDeclaration : public TypeDeclaration {
+  DeclList Fields;
+
+public:
+  RecordTypeDeclaration(Decl *EnclosingDecl, SMLoc Loc, StringRef Name,
+                        DeclList Fields)
+      : TypeDeclaration(DK_RecordType, EnclosingDecl, Loc, Name),
+        Fields(std::move(Fields)) {}
+
+  const DeclList &getFields() { return Fields; }
+
+  VariableDeclaration *lookupField(StringRef Name) {
+    for (const auto &F : Fields) {
+      auto *FD = cast<VariableDeclaration>(F.get());
+      if (FD->getName() == Name)
+        return FD;
+    }
+    return nullptr;
+  }
+
+  static bool classof(const Decl *D) {
+    return D->getKind() == DK_RecordType;
+  }
 };
 
 class FormalParameterDeclaration : public Decl {
@@ -250,6 +278,7 @@ public:
     EK_Const,
     EK_Func,
     EK_Indexed,
+    EK_Field,
   };
 
 private:
@@ -380,6 +409,21 @@ public:
   Expr *getIndex() { return Index.get(); }
 
   static bool classof(const Expr *E) { return E->getKind() == EK_Indexed; }
+};
+
+class FieldAccess : public Expr {
+  std::unique_ptr<Expr> Base;
+  VariableDeclaration *Field;
+
+public:
+  FieldAccess(std::unique_ptr<Expr> Base, VariableDeclaration *Field)
+      : Expr(EK_Field, Field->getType(), false), Base(std::move(Base)),
+        Field(Field) {}
+
+  Expr *getBase() { return Base.get(); }
+  VariableDeclaration *getField() { return Field; }
+
+  static bool classof(const Expr *E) { return E->getKind() == EK_Field; }
 };
 
 class Stmt {
