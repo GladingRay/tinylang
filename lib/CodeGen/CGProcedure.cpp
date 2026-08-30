@@ -325,9 +325,11 @@ llvm::Value *CGProcedure::emitExpr(Expr *E) {
     llvm::Function *Callee = resolveFunction(Proc);
     return Builder.CreateCall(Callee->getFunctionType(), Callee, Args);
   } else if (auto *Idx = llvm::dyn_cast<IndexedExpression>(E)) {
-    auto *ArrTy = llvm::cast<ArrayTypeDeclaration>(Idx->getBase()->getType());
+    auto *ArrTy = llvm::cast<ArrayTypeDeclaration>(
+        getUnderlyingType(Idx->getBase()->getType()));
     llvm::Value *Addr = emitLValue(Idx);
-    if (llvm::isa<ArrayTypeDeclaration>(ArrTy->getElementType()))
+    if (llvm::isa<ArrayTypeDeclaration>(
+            getUnderlyingType(ArrTy->getElementType())))
       return Addr; // address of the sub-array (multi-dimensional arrays)
     return Builder.CreateLoad(CGM.convertType(ArrTy->getElementType()), Addr);
   }
@@ -335,7 +337,8 @@ llvm::Value *CGProcedure::emitExpr(Expr *E) {
 }
 
 llvm::Value *CGProcedure::emitLValue(IndexedExpression *E) {
-  auto *ArrTy = llvm::cast<ArrayTypeDeclaration>(E->getBase()->getType());
+  auto *ArrTy = llvm::cast<ArrayTypeDeclaration>(
+      getUnderlyingType(E->getBase()->getType()));
   llvm::Value *Base = emitExpr(E->getBase());
   llvm::Value *Index = emitExpr(E->getIndex());
   // Normalize the (inclusive) Modula-2 subrange to a zero-based LLVM index.

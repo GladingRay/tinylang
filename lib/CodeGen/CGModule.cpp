@@ -23,6 +23,7 @@ void CGModule::initialize() {
 }
 
 llvm::Type *CGModule::convertType(TypeDeclaration *Ty) {
+  Ty = getUnderlyingType(Ty);
   if (auto *ArrTy = llvm::dyn_cast<ArrayTypeDeclaration>(Ty))
     return llvm::ArrayType::get(
         convertType(ArrTy->getElementType()),

@@ -46,6 +46,8 @@ public:
   void actOnImport(StringRef ModuleName, IdentList &Ids);
   void actOnConstantDeclaration(DeclList &Decls, SMLoc Loc, StringRef Name,
                                 std::unique_ptr<Expr> E);
+  void actOnTypeDeclaration(DeclList &Decls, SMLoc Loc, StringRef Name,
+                            Decl *D);
   TypeDeclaration *actOnArrayType(SMLoc Loc, std::unique_ptr<Expr> Low,
                                   std::unique_ptr<Expr> High,
                                   TypeDeclaration *ElementType);

@@ -58,6 +58,7 @@ KEYWORD(OR                          , KEYALL)
 KEYWORD(PROCEDURE                   , KEYALL)
 KEYWORD(RETURN                      , KEYALL)
 KEYWORD(THEN                        , KEYALL)
+KEYWORD(TYPE                        , KEYALL)
 KEYWORD(VAR                         , KEYALL)
 KEYWORD(WHILE                       , KEYALL)
 

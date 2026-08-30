@@ -52,7 +52,8 @@ bool Parser::parseCompilationUnit(std::unique_ptr<ModuleDeclaration> &D) {
 bool Parser::parseImport() {
   auto _errorhandler = [this] {
     return skipUntil(tok::kw_BEGIN, tok::kw_CONST, tok::kw_END, tok::kw_FROM,
-                     tok::kw_IMPORT, tok::kw_PROCEDURE, tok::kw_VAR);
+                     tok::kw_IMPORT, tok::kw_PROCEDURE, tok::kw_TYPE,
+                     tok::kw_VAR);
   };
   IdentList Ids;
   StringRef ModuleName;
@@ -76,7 +77,8 @@ bool Parser::parseImport() {
 
 bool Parser::parseBlock(DeclList &Decls, StmtList &Stmts) {
   auto _errorhandler = [this] { return skipUntil(tok::identifier); };
-  while (Tok.isOneOf(tok::kw_CONST, tok::kw_PROCEDURE, tok::kw_VAR)) {
+  while (Tok.isOneOf(tok::kw_CONST, tok::kw_PROCEDURE, tok::kw_TYPE,
+                     tok::kw_VAR)) {
     if (parseDeclaration(Decls))
       return _errorhandler();
   }
@@ -93,7 +95,7 @@ bool Parser::parseBlock(DeclList &Decls, StmtList &Stmts) {
 bool Parser::parseDeclaration(DeclList &Decls) {
   auto _errorhandler = [this] {
     return skipUntil(tok::kw_BEGIN, tok::kw_CONST, tok::kw_END,
-                     tok::kw_PROCEDURE, tok::kw_VAR);
+                     tok::kw_PROCEDURE, tok::kw_TYPE, tok::kw_VAR);
   };
   if (Tok.is(tok::kw_CONST)) {
     advance();
@@ -107,6 +109,14 @@ bool Parser::parseDeclaration(DeclList &Decls) {
     advance();
     while (Tok.is(tok::identifier)) {
       if (parseVariableDeclaration(Decls))
+        return _errorhandler();
+      if (consume(tok::semi))
+        return _errorhandler();
+    }
+  } else if (Tok.is(tok::kw_TYPE)) {
+    advance();
+    while (Tok.is(tok::identifier)) {
+      if (parseTypeDeclaration(Decls))
         return _errorhandler();
       if (consume(tok::semi))
         return _errorhandler();
@@ -138,6 +148,24 @@ bool Parser::parseConstantDeclaration(DeclList &Decls) {
   if (parseExpression(E))
     return _errorhandler();
   Actions.actOnConstantDeclaration(Decls, Loc, Name, std::move(E));
+  return false;
+}
+
+bool Parser::parseTypeDeclaration(DeclList &Decls) {
+  auto _errorhandler = [this] { return skipUntil(tok::semi); };
+  if (expect(tok::identifier))
+    return _errorhandler();
+  SMLoc Loc = Tok.getLocation();
+
+  StringRef Name = Tok.getIdentifier();
+  advance();
+  if (expect(tok::equal))
+    return _errorhandler();
+  Decl *D = nullptr;
+  advance();
+  if (parseType(D))
+    return _errorhandler();
+  Actions.actOnTypeDeclaration(Decls, Loc, Name, D);
   return false;
 }
 

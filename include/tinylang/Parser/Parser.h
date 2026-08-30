@@ -61,6 +61,7 @@ class Parser {
   bool parseBlock(DeclList &Decls, StmtList &Stmts);
   bool parseDeclaration(DeclList &Decls);
   bool parseConstantDeclaration(DeclList &Decls);
+  bool parseTypeDeclaration(DeclList &Decls);
   bool parseVariableDeclaration(DeclList &Decls);
   bool parseType(Decl *&D);
   bool parseProcedureDeclaration(DeclList &ParentDecls);

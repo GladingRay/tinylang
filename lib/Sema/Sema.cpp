@@ -41,6 +41,7 @@ void Sema::leaveScope() {
 }
 
 bool Sema::isOperatorForType(tok::TokenKind Op, TypeDeclaration *Ty) {
+  Ty = getUnderlyingType(Ty);
   switch (Op) {
   case tok::plus:
   case tok::minus:
@@ -60,6 +61,8 @@ bool Sema::isOperatorForType(tok::TokenKind Op, TypeDeclaration *Ty) {
 }
 
 bool Sema::isSameType(TypeDeclaration *LHS, TypeDeclaration *RHS) {
+  LHS = getUnderlyingType(LHS);
+  RHS = getUnderlyingType(RHS);
   if (LHS == RHS)
     return true;
   if (auto *LArr = dyn_cast<ArrayTypeDeclaration>(LHS))
@@ -143,6 +146,22 @@ void Sema::actOnConstantDeclaration(DeclList &Decls, SMLoc Loc, StringRef Name,
     Diags.report(Loc, diag::err_symbold_declared, Name);
 }
 
+void Sema::actOnTypeDeclaration(DeclList &Decls, SMLoc Loc, StringRef Name,
+                                Decl *D) {
+  assert(CurrentScope && "CurrentScope not set");
+  TypeDeclaration *Aliased = dyn_cast_or_null<TypeDeclaration>(D);
+  if (!Aliased) {
+    Diags.report(Loc, diag::err_typedecl_requires_type);
+    return;
+  }
+  auto Decl = std::make_unique<TypeAliasDeclaration>(CurrentDecl, Loc, Name,
+                                                     Aliased);
+  if (CurrentScope->insert(Decl.get()))
+    Decls.push_back(std::move(Decl));
+  else
+    Diags.report(Loc, diag::err_symbold_declared, Name);
+}
+
 TypeDeclaration *Sema::actOnArrayType(SMLoc Loc, std::unique_ptr<Expr> Low,
                                       std::unique_ptr<Expr> High,
                                       TypeDeclaration *ElementType) {
@@ -190,7 +209,7 @@ void Sema::actOnFormalParameterDeclaration(FormalParamList &Params,
   if (!D)
     return;
   if (TypeDeclaration *Ty = dyn_cast<TypeDeclaration>(D)) {
-    if (!IsVar && isa<ArrayTypeDeclaration>(Ty)) {
+    if (!IsVar && isa<ArrayTypeDeclaration>(getUnderlyingType(Ty))) {
       if (!Ids.empty())
         Diags.report(Ids.front().first, diag::err_array_param_requires_var);
       return;
@@ -262,7 +281,7 @@ void Sema::actOnAssignment(StmtList &Stmts, SMLoc Loc,
   } else {
     return;
   }
-  if (isa<ArrayTypeDeclaration>(Ty)) {
+  if (isa<ArrayTypeDeclaration>(getUnderlyingType(Ty))) {
     Diags.report(Loc, diag::err_array_assignment_not_supported);
     return;
   }
@@ -295,7 +314,7 @@ void Sema::actOnIfStatement(StmtList &Stmts, SMLoc Loc,
   if (!Cond)
     Cond = std::make_unique<BooleanLiteral>(false, BooleanType.get());
 
-  if (Cond->getType() != BooleanType.get()) {
+  if (!isSameType(Cond->getType(), BooleanType.get())) {
     Diags.report(Loc, diag::err_if_expr_must_be_bool);
   }
   Stmts.push_back(std::make_unique<IfStatement>(
@@ -308,7 +327,7 @@ void Sema::actOnWhileStatement(StmtList &Stmts, SMLoc Loc,
   if (!Cond)
     Cond = std::make_unique<BooleanLiteral>(false, BooleanType.get());
 
-  if (Cond->getType() != BooleanType.get()) {
+  if (!isSameType(Cond->getType(), BooleanType.get())) {
     Diags.report(Loc, diag::err_while_expr_must_be_bool);
   }
   Stmts.push_back(
@@ -323,7 +342,7 @@ void Sema::actOnReturnStatement(StmtList &Stmts, SMLoc Loc,
   else if (!Proc->getRetType() && RetVal)
     Diags.report(Loc, diag::err_procedure_requires_empty_return);
   else if (Proc->getRetType() && RetVal) {
-    if (Proc->getRetType() != RetVal->getType())
+    if (!isSameType(Proc->getRetType(), RetVal->getType()))
       Diags.report(Loc, diag::err_function_and_return_type);
   }
 
@@ -339,7 +358,7 @@ Sema::actOnExpression(std::unique_ptr<Expr> Left, std::unique_ptr<Expr> Right,
   if (!Right)
     return Left;
 
-  if (Left->getType() != Right->getType()) {
+  if (!isSameType(Left->getType(), Right->getType())) {
     Diags.report(Op.getLocation(), diag::err_types_for_operator_not_compatible,
                  getOperatorSpelling(Op.getKind()));
   }
@@ -358,7 +377,7 @@ Sema::actOnSimpleExpression(std::unique_ptr<Expr> Left,
   if (!Right)
     return Left;
 
-  if (Left->getType() != Right->getType()) {
+  if (!isSameType(Left->getType(), Right->getType())) {
     Diags.report(Op.getLocation(), diag::err_types_for_operator_not_compatible,
                  getOperatorSpelling(Op.getKind()));
   }
@@ -383,7 +402,7 @@ std::unique_ptr<Expr> Sema::actOnTerm(std::unique_ptr<Expr> Left,
   if (!Right)
     return Left;
 
-  if (Left->getType() != Right->getType() ||
+  if (!isSameType(Left->getType(), Right->getType()) ||
       !isOperatorForType(Op.getKind(), Left->getType())) {
     Diags.report(Op.getLocation(), diag::err_types_for_operator_not_compatible,
                  getOperatorSpelling(Op.getKind()));
@@ -469,12 +488,13 @@ std::unique_ptr<Expr> Sema::actOnIndexedExpression(SMLoc Loc,
                                                    std::unique_ptr<Expr> Index) {
   if (!Base || !Index)
     return nullptr;
-  auto *ArrTy = dyn_cast<ArrayTypeDeclaration>(Base->getType());
+  auto *ArrTy =
+      dyn_cast<ArrayTypeDeclaration>(getUnderlyingType(Base->getType()));
   if (!ArrTy) {
     Diags.report(Loc, diag::err_indexed_expression_requires_array);
     return nullptr;
   }
-  if (Index->getType() != IntegerType.get()) {
+  if (!isSameType(Index->getType(), IntegerType.get())) {
     Diags.report(Loc, diag::err_index_expression_must_be_integer);
   }
   return std::make_unique<IndexedExpression>(

@@ -25,6 +25,7 @@ class ASTDumper {
   void dumpModule(ModuleDeclaration *M);
   void dumpConstant(ConstantDeclaration *C);
   void dumpType(TypeDeclaration *T);
+  void dumpTypeAlias(TypeAliasDeclaration *T);
   void dumpTypeName(TypeDeclaration *T);
   void dumpVariable(VariableDeclaration *V);
   void dumpFormalParameter(FormalParameterDeclaration *P);

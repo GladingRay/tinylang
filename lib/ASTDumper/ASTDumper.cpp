@@ -79,6 +79,9 @@ void ASTDumper::dumpDecl(Decl *D) {
   case Decl::DK_ArrayType:
     dumpType(cast<ArrayTypeDeclaration>(D));
     break;
+  case Decl::DK_TypeAlias:
+    dumpTypeAlias(cast<TypeAliasDeclaration>(D));
+    break;
   case Decl::DK_Var:
     dumpVariable(cast<VariableDeclaration>(D));
     break;
@@ -111,11 +114,20 @@ void ASTDumper::dumpType(TypeDeclaration *T) {
   }
 }
 
+void ASTDumper::dumpTypeAlias(TypeAliasDeclaration *T) {
+  printIndent();
+  OS << "TypeAliasDeclaration '" << T->getName() << "' = ";
+  dumpTypeName(T->getAliasedType());
+  OS << "\n";
+}
+
 void ASTDumper::dumpTypeName(TypeDeclaration *T) {
   if (auto *ArrTy = dyn_cast<ArrayTypeDeclaration>(T)) {
     OS << "ARRAY [" << ArrTy->getLowBound() << ".." << ArrTy->getHighBound()
        << "] OF ";
     dumpTypeName(ArrTy->getElementType());
+  } else if (auto *Alias = dyn_cast<TypeAliasDeclaration>(T)) {
+    OS << Alias->getName();
   } else {
     OS << T->getName();
   }

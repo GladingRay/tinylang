@@ -3,6 +3,7 @@
 #include "tinylang/Basic/TokenKinds.h"
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/SMLoc.h"
 #include <cstdint>
 #include <memory>
@@ -43,6 +44,7 @@ public:
     DK_Const,
     DK_Type,
     DK_ArrayType,
+    DK_TypeAlias,
     DK_Var,
     DK_Param,
     DK_Proc
@@ -112,9 +114,36 @@ public:
       : TypeDeclaration(DK_Type, EnclosingDecl, Loc, Name) {}
 
   static bool classof(const Decl *D) {
-    return D->getKind() == DK_Type || D->getKind() == DK_ArrayType;
+    return D->getKind() == DK_Type || D->getKind() == DK_ArrayType ||
+           D->getKind() == DK_TypeAlias;
   }
 };
+
+/// A named type alias, e.g. TYPE T = U.  The aliased type is referenced, not
+/// owned; it is resolved to its underlying type wherever type compatibility
+/// and LLVM type conversion are performed.
+class TypeAliasDeclaration : public TypeDeclaration {
+  TypeDeclaration *Aliased;
+
+public:
+  TypeAliasDeclaration(Decl *EnclosingDecl, SMLoc Loc, StringRef Name,
+                       TypeDeclaration *Aliased)
+      : TypeDeclaration(DK_TypeAlias, EnclosingDecl, Loc, Name),
+        Aliased(Aliased) {}
+
+  TypeDeclaration *getAliasedType() { return Aliased; }
+
+  static bool classof(const Decl *D) {
+    return D->getKind() == DK_TypeAlias;
+  }
+};
+
+/// Resolves chains of type aliases to the first non-alias type.
+inline TypeDeclaration *getUnderlyingType(TypeDeclaration *Ty) {
+  while (auto *Alias = dyn_cast<TypeAliasDeclaration>(Ty))
+    Ty = Alias->getAliasedType();
+  return Ty;
+}
 
 /// A static array type, e.g. ARRAY [1..10] OF INTEGER.  The element type is
 /// referenced (not owned); bounds are inclusive and fixed at compile time.
