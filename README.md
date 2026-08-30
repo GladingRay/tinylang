@@ -62,7 +62,7 @@ More examples live in `example/`: `Gcd.mod`, `Fib.mod`, `Arrays.mod`, `TypeAlias
 | Driver | ✅ Done | `tinylang` executable; parse, diagnose, emit IR/assembly |
 | ASTDumper | ✅ Done | `tinylang-astdump` tool for printing the AST |
 | Build system | ✅ Done | CMake + `find_package(LLVM)`, C++17, per-module libraries |
-| Testing | ✅ Done | diagnostic regression tests under `test/` (24 `.mod` cases) plus end-to-end examples |
+| Testing | ✅ Done | diagnostic regression tests under `test/` (27 `.mod` cases) plus end-to-end examples |
 | Code generation | ✅ Done | functions, control flow, globals, arrays, records, type aliases |
 
 Known limitations: `IMPORT` is not implemented yet, module body statements are parsed but not yet emitted, and functions cannot return array/record values.
