@@ -281,9 +281,6 @@ void Sema::actOnProcedureHeading(ProcedureDeclaration *ProcDecl,
   if (!RetTypeDecl && RetType)
     Diags.report(RetTypeLoc, diag::err_returntype_must_be_type);
   else if (RetTypeDecl) {
-    TypeDeclaration *UT = getUnderlyingType(RetTypeDecl);
-    if (isa<ArrayTypeDeclaration>(UT) || isa<RecordTypeDeclaration>(UT))
-      Diags.report(RetTypeLoc, diag::err_aggregate_return_not_supported);
     ProcDecl->setRetType(RetTypeDecl);
   }
 }
@@ -322,10 +319,6 @@ void Sema::actOnAssignment(StmtList &Stmts, SMLoc Loc,
   } else if (auto *Field = dyn_cast<FieldAccess>(Target.get())) {
     Ty = Field->getType();
   } else {
-    return;
-  }
-  if (isa<ArrayTypeDeclaration>(getUnderlyingType(Ty))) {
-    Diags.report(Loc, diag::err_array_assignment_not_supported);
     return;
   }
   if (!isSameType(Ty, E->getType())) {

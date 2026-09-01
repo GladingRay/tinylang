@@ -690,6 +690,8 @@ bool Parser::parseFactor(std::unique_ptr<Expr> &E) {
         return _errorhandler();
       E = Actions.actOnFunctionCall(Loc, D, std::move(Exprs));
       advance();
+      if (parseDesignator(E))
+        return _errorhandler();
     } else {
       E = Actions.actOnVariable(D);
       if (parseDesignator(E))

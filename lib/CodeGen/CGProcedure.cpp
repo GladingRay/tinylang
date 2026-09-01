@@ -333,7 +333,19 @@ llvm::Value *CGProcedure::emitExpr(Expr *E) {
       Args.push_back(V);
     }
     llvm::Function *Callee = resolveFunction(Proc);
-    return Builder.CreateCall(Callee->getFunctionType(), Callee, Args);
+    llvm::Value *Call = Builder.CreateCall(Callee->getFunctionType(), Callee,
+                                           Args);
+    if (Proc->getRetType()) {
+      llvm::Type *RetTy = CGM.convertType(Proc->getRetType());
+      if (RetTy->isAggregateType()) {
+        // Aggregates are represented by address everywhere else, so spill the
+        // by-value call result into a temporary and return its address.
+        llvm::Value *Addr = Builder.CreateAlloca(RetTy);
+        Builder.CreateStore(Call, Addr);
+        return Addr;
+      }
+    }
+    return Call;
   } else if (auto *Idx = llvm::dyn_cast<IndexedExpression>(E)) {
     auto *ArrTy = llvm::cast<ArrayTypeDeclaration>(
         getUnderlyingType(Idx->getBase()->getType()));
@@ -530,6 +542,11 @@ void CGProcedure::emitStmt(WhileStatement *Stmt) {
 void CGProcedure::emitStmt(ReturnStatement *Stmt) {
   if (Stmt->getRetVal()) {
     llvm::Value *RetVal = emitExpr(Stmt->getRetVal());
+    if (Proc->getRetType()) {
+      llvm::Type *RetTy = CGM.convertType(Proc->getRetType());
+      if (RetTy->isAggregateType())
+        RetVal = Builder.CreateLoad(RetTy, RetVal);
+    }
     Builder.CreateRet(RetVal);
   } else {
     Builder.CreateRetVoid();

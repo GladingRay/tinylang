@@ -15,7 +15,7 @@ tinylang 实现的是 Modula-2 的一个实用子集：
   - `CONST` 常量
   - `VAR` 变量（模块级全局变量和过程内局部变量）
   - `TYPE` 类型别名（`TYPE MyInt = INTEGER;`）、静态数组（`ARRAY [下界..上界] OF T`，支持多维数组）与记录（`RECORD ... END`）
-  - `PROCEDURE` 过程/函数，支持形参、`VAR` 引用参数和标量返回类型
+  - `PROCEDURE` 过程/函数，支持形参、`VAR` 引用参数和返回类型（包括数组与记录）
 - **语句**：赋值 `:=`、过程调用、`IF`/`THEN`/`ELSE`/`END`、`WHILE`/`DO`/`END`、`RETURN`
 - **表达式**：算术运算 `+ - * / DIV MOD`、关系运算 `= # < <= > >=`、逻辑运算 `AND OR NOT`
 - **字面量**：十进制整数 `123`、十六进制整数 `123H`；字符串/字符字面量目前仅由词法分析器识别
@@ -48,7 +48,7 @@ END GCD;
 END Gcd.
 ```
 
-更多示例见 `example/`：`Gcd.mod`、`Fib.mod`、`Arrays.mod`、`TypeAlias.mod`、`Record.mod`，每个都配有对应的 `call*.c` 验证程序。
+更多示例见 `example/`：`Gcd.mod`、`Fib.mod`、`Arrays.mod`、`TypeAlias.mod`、`Record.mod`、`ReturnRecord.mod`、`ReturnArray.mod`，每个都配有对应的 `call*.c` 验证程序。
 
 ## 当前进度
 
@@ -62,10 +62,10 @@ END Gcd.
 | Driver | ✅ 已完成 | `tinylang` 可执行文件：解析、诊断、输出 IR/汇编 |
 | ASTDumper | ✅ 已完成 | `tinylang-astdump` 工具，打印 AST |
 | 构建系统 | ✅ 已完成 | CMake + `find_package(LLVM)`、C++17、按模块拆分静态库 |
-| 测试 | ✅ 已完成 | `test/` 下的诊断回归测试（27 个 `.mod` 用例）以及端到端示例 |
-| 代码生成 | ✅ 已完成 | 函数、控制流、全局变量、数组、记录与类型别名 |
+| 测试 | ✅ 已完成 | `test/` 下的诊断回归测试（26 个 `.mod` 用例）以及端到端示例 |
+| 代码生成 | ✅ 已完成 | 函数、控制流、全局变量、数组、记录、类型别名与聚合类型返回值 |
 
-已知限制：`IMPORT` 尚未实现；模块体的语句会被解析但暂不生成代码；函数暂时不能返回数组/记录类型。
+已知限制：`IMPORT` 尚未实现；模块体的语句会被解析但暂不生成代码。
 
 ## 项目结构
 
@@ -156,7 +156,7 @@ cc /tmp/Record.o /tmp/callrecord.o -o /tmp/callrecord
 - **词法分析**：关键字通过 `llvm::StringMap` 匹配；数字支持十进制与 `H` 后缀十六进制；注释支持嵌套。
 - **AST**：采用 LLVM 风格的多态类层次，通过 `classof()` 支持 `isa`/`cast` 风格的向下转型。
 - **语义分析**：`Scope` 用 `llvm::StringMap` 实现符号表，`EnterDeclScope` 以 RAII 方式管理作用域，`Sema` 通过 `actOn*` 回调与 Parser 解耦。
-- **代码生成**：`CGModule`/`CGProcedure` 使用 `llvm::IRBuilder`。标量局部变量走 SSA 并构造 phi 节点；数组/记录等聚合类型保存在内存中并用 GEP 访问；record 整体赋值生成 `memcpy`；符号按 `_t<长度><名字>` 规则混淆。
+- **代码生成**：`CGModule`/`CGProcedure` 使用 `llvm::IRBuilder`。标量局部变量走 SSA 并构造 phi 节点；数组/记录等聚合类型保存在内存中并用 GEP 访问；record/数组整体赋值生成 `memcpy`；聚合类型返回值通过临时 alloca 保存；符号按 `_t<长度><名字>` 规则混淆。
 - **调试 IR dump**：配置时加 `-DTINYLANG_ENABLE_IR_DUMP=ON`，会在 phi 节点创建/更新前后写出 `tinylang-dump-<N>.ll` 快照。
 - **健壮的错误处理**：Sema 能容忍语法错误恢复；词法层报告过的非法十进制字面量按 0 处理而不是中止编译。
 
@@ -170,7 +170,8 @@ cc /tmp/Record.o /tmp/callrecord.o -o /tmp/callrecord
 - [x] AST dump 工具
 - [ ] 模块导入（`IMPORT`）与模块体语句
 - [ ] 变体记录、`WITH`、`SET`、指针类型
-- [ ] 数组/记录返回值与更多优化
+- [x] 数组/记录返回值
+- [ ] 更多优化
 
 ## 参考
 

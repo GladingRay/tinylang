@@ -37,8 +37,6 @@ DIAG(err_indexed_expression_requires_array, Error, "indexed expression requires 
 DIAG(err_index_expression_must_be_integer, Error, "index expression must have type INTEGER")
 DIAG(err_field_access_requires_record, Error, "field access requires a record")
 DIAG(err_undeclared_field, Error, "field {0} is not declared in record")
-DIAG(err_array_assignment_not_supported, Error, "assignment to whole array is not supported")
-DIAG(err_aggregate_return_not_supported, Error, "function return type must not be an aggregate type")
 DIAG(err_wrong_number_of_parameters, Error, "wrong number of parameters")
 DIAG(err_type_of_formal_and_actual_parameter_not_compatible, Error, "type of formal and actual parameter are not compatible")
 DIAG(err_var_parameter_requires_var, Error, "VAR parameter requires variable as argument")

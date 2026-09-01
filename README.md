@@ -15,7 +15,7 @@ tinylang implements a practical subset of Modula-2:
   - `CONST` constants
   - `VAR` variables (module-level globals and locals)
   - `TYPE` type aliases (`TYPE MyInt = INTEGER;`), static arrays (`ARRAY [low..high] OF T`, including multi-dimensional arrays), and records (`RECORD ... END`)
-  - `PROCEDURE` procedures/functions with formal parameters, `VAR` reference parameters, and scalar return types
+  - `PROCEDURE` procedures/functions with formal parameters, `VAR` reference parameters, and return types (including arrays and records)
 - **Statements**: assignment `:=`, procedure calls, `IF`/`THEN`/`ELSE`/`END`, `WHILE`/`DO`/`END`, `RETURN`
 - **Expressions**: arithmetic `+ - * / DIV MOD`, relational `= # < <= > >=`, logical `AND OR NOT`
 - **Literals**: decimal integers `123`, hexadecimal integers `123H`; string/char literals are recognized by the lexer
@@ -48,7 +48,7 @@ END GCD;
 END Gcd.
 ```
 
-More examples live in `example/`: `Gcd.mod`, `Fib.mod`, `Arrays.mod`, `TypeAlias.mod`, and `Record.mod`, each with a matching `call*.c` harness.
+More examples live in `example/`: `Gcd.mod`, `Fib.mod`, `Arrays.mod`, `TypeAlias.mod`, `Record.mod`, `ReturnRecord.mod`, and `ReturnArray.mod`, each with a matching `call*.c` harness.
 
 ## Current Status
 
@@ -62,10 +62,10 @@ More examples live in `example/`: `Gcd.mod`, `Fib.mod`, `Arrays.mod`, `TypeAlias
 | Driver | ✅ Done | `tinylang` executable; parse, diagnose, emit IR/assembly |
 | ASTDumper | ✅ Done | `tinylang-astdump` tool for printing the AST |
 | Build system | ✅ Done | CMake + `find_package(LLVM)`, C++17, per-module libraries |
-| Testing | ✅ Done | diagnostic regression tests under `test/` (27 `.mod` cases) plus end-to-end examples |
-| Code generation | ✅ Done | functions, control flow, globals, arrays, records, type aliases |
+| Testing | ✅ Done | diagnostic regression tests under `test/` (26 `.mod` cases) plus end-to-end examples |
+| Code generation | ✅ Done | functions, control flow, globals, arrays, records, type aliases, aggregate return values |
 
-Known limitations: `IMPORT` is not implemented yet, module body statements are parsed but not yet emitted, and functions cannot return array/record values.
+Known limitations: `IMPORT` is not implemented yet and module body statements are parsed but not yet emitted.
 
 ## Project Structure
 
@@ -156,7 +156,7 @@ The same pattern is used by the `call*.c` harnesses for `Gcd`, `Fib`, `Arrays`, 
 - **Lexer**: keywords are matched with an `llvm::StringMap`; numbers support decimal and `H`-suffixed hexadecimal literals; comments nest.
 - **AST**: LLVM-style polymorphic class hierarchy with `isa`/`cast`-style downcasting via `classof()`.
 - **Semantic analysis**: `Scope` implements the symbol table; `EnterDeclScope` uses RAII; `Sema` is decoupled from the parser through `actOn*` callbacks.
-- **Code generation**: `CGModule`/`CGProcedure` use `llvm::IRBuilder`. Scalar locals use SSA with phi construction; aggregates (arrays/records) are kept in memory and accessed with GEP; record assignment lowers to `memcpy`; symbols are mangled with `_t<len><name>`.
+- **Code generation**: `CGModule`/`CGProcedure` use `llvm::IRBuilder`. Scalar locals use SSA with phi construction; aggregates (arrays/records) are kept in memory and accessed with GEP; record/array assignment lowers to `memcpy`; aggregate return values are spilled through a temporary alloca; symbols are mangled with `_t<len><name>`.
 - **Debug IR dump**: configure with `-DTINYLANG_ENABLE_IR_DUMP=ON` to write `tinylang-dump-<N>.ll` snapshots around phi-node creation/updates.
 - **Robust error handling**: parser error recovery is guarded in Sema; invalid decimal literals reported by the lexer are treated as `0` instead of aborting.
 
@@ -170,7 +170,8 @@ The same pattern is used by the `call*.c` harnesses for `Gcd`, `Fib`, `Arrays`, 
 - [x] AST dump tool
 - [ ] Module imports (`IMPORT`) and module body statements
 - [ ] Variant records, `WITH`, `SET`, pointer types
-- [ ] Array/record return values and more optimization passes
+- [x] Array/record return values
+- [ ] More optimization passes
 
 ## References
 
