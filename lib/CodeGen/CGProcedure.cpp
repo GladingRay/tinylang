@@ -227,15 +227,22 @@ CGProcedure::emitInfixExpr(InfixExpression *E) {
   llvm::Value *Left = emitExpr(E->getLeft());
   llvm::Value *Right = emitExpr(E->getRight());
   llvm::Value *Result = nullptr;
+  // Modula-2 keeps INTEGER and REAL in separate type families, so the
+  // operand types of a valid expression are the same; REAL is a 32-bit float.
+  bool IsReal = getUnderlyingType(E->getLeft()->getType())->getName() ==
+                "REAL";
   switch (E->getOperatorInfo().getKind()) {
   case tok::plus:
-    Result = Builder.CreateNSWAdd(Left, Right);
+    Result = IsReal ? Builder.CreateFAdd(Left, Right)
+                    : Builder.CreateNSWAdd(Left, Right);
     break;
   case tok::minus:
-    Result = Builder.CreateNSWSub(Left, Right);
+    Result = IsReal ? Builder.CreateFSub(Left, Right)
+                    : Builder.CreateNSWSub(Left, Right);
     break;
   case tok::star:
-    Result = Builder.CreateNSWMul(Left, Right);
+    Result = IsReal ? Builder.CreateFMul(Left, Right)
+                    : Builder.CreateNSWMul(Left, Right);
     break;
   case tok::kw_DIV:
     Result = Builder.CreateSDiv(Left, Right);
@@ -243,23 +250,32 @@ CGProcedure::emitInfixExpr(InfixExpression *E) {
   case tok::kw_MOD:
     Result = Builder.CreateSRem(Left, Right);
     break;
+  case tok::slash:
+    Result = Builder.CreateFDiv(Left, Right);
+    break;
   case tok::equal:
-    Result = Builder.CreateICmpEQ(Left, Right);
+    Result = IsReal ? Builder.CreateFCmpOEQ(Left, Right)
+                    : Builder.CreateICmpEQ(Left, Right);
     break;
   case tok::hash:
-    Result = Builder.CreateICmpNE(Left, Right);
+    Result = IsReal ? Builder.CreateFCmpONE(Left, Right)
+                    : Builder.CreateICmpNE(Left, Right);
     break;
   case tok::less:
-    Result = Builder.CreateICmpSLT(Left, Right);
+    Result = IsReal ? Builder.CreateFCmpOLT(Left, Right)
+                    : Builder.CreateICmpSLT(Left, Right);
     break;
   case tok::lessequal:
-    Result = Builder.CreateICmpSLE(Left, Right);
+    Result = IsReal ? Builder.CreateFCmpOLE(Left, Right)
+                    : Builder.CreateICmpSLE(Left, Right);
     break;
   case tok::greater:
-    Result = Builder.CreateICmpSGT(Left, Right);
+    Result = IsReal ? Builder.CreateFCmpOGT(Left, Right)
+                    : Builder.CreateICmpSGT(Left, Right);
     break;
   case tok::greaterequal:
-    Result = Builder.CreateICmpSGE(Left, Right);
+    Result = IsReal ? Builder.CreateFCmpOGE(Left, Right)
+                    : Builder.CreateICmpSGE(Left, Right);
     break;
   case tok::kw_AND:
     Result = Builder.CreateAnd(Left, Right);
@@ -267,9 +283,6 @@ CGProcedure::emitInfixExpr(InfixExpression *E) {
   case tok::kw_OR:
     Result = Builder.CreateOr(Left, Right);
     break;
-  case tok::slash:
-    // Divide by real numbers not supported.
-    LLVM_FALLTHROUGH;
   default:
     llvm_unreachable("Wrong operator");
   }
@@ -279,12 +292,15 @@ CGProcedure::emitInfixExpr(InfixExpression *E) {
 llvm::Value *
 CGProcedure::emitPrefixExpr(PrefixExpression *E) {
   llvm::Value *Result = emitExpr(E->getExpr());
+  bool IsReal = getUnderlyingType(E->getExpr()->getType())->getName() ==
+                "REAL";
   switch (E->getOperatorInfo().getKind()) {
   case tok::plus:
     // Identity - nothing to do.
     break;
   case tok::minus:
-    Result = Builder.CreateNeg(Result);
+    Result = IsReal ? Builder.CreateFNeg(Result)
+                    : Builder.CreateNeg(Result);
     break;
   case tok::kw_NOT:
     Result = Builder.CreateNot(Result);
@@ -314,6 +330,8 @@ llvm::Value *CGProcedure::emitExpr(Expr *E) {
                  llvm::dyn_cast<IntegerLiteral>(E)) {
     return llvm::ConstantInt::get(CGM.Int64Ty,
                                   IntLit->getValue());
+  } else if (auto *RealLit = llvm::dyn_cast<RealLiteral>(E)) {
+    return llvm::ConstantFP::get(CGM.FloatTy, RealLit->getValue());
   } else if (auto *BoolLit =
                  llvm::dyn_cast<BooleanLiteral>(E)) {
     return llvm::ConstantInt::get(CGM.Int1Ty,

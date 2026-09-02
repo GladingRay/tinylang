@@ -13,6 +13,8 @@
 DIAG(err_unterminated_block_comment, Error, "unterminated (* comment")
 DIAG(err_unterminated_char_or_string, Error, "missing terminating character")
 DIAG(err_hex_digit_in_decimal, Error, "decimal number contains hex digit")
+DIAG(err_invalid_real_literal, Error, "invalid real literal")
+DIAG(err_longreal_literal_not_implemented, Error, "LONGREAL literals (scale factor D) are not implemented yet")
 
 DIAG(err_expected, Error, "expected {0} but found {1}")
 DIAG(err_module_identifier_not_equal, Error, "module identifier at begin and end not equal")

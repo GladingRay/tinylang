@@ -16,6 +16,7 @@ TOK(eof)                 // End of file.
 TOK(identifier)          // abcde123
 
 TOK(integer_literal)     // 123, 123B, 123H
+TOK(real_literal)        // 12.3, 4.567E8, 1.0E-3
 TOK(string_literal)      // "foo", 'foo'
 
 PUNCTUATOR(plus,                "+")

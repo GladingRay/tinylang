@@ -289,6 +289,9 @@ void ASTDumper::dumpExpr(Expr *E) {
   case Expr::EK_Int:
     dumpIntLiteral(cast<IntegerLiteral>(E));
     break;
+  case Expr::EK_Real:
+    dumpRealLiteral(cast<RealLiteral>(E));
+    break;
   case Expr::EK_Bool:
     dumpBoolLiteral(cast<BooleanLiteral>(E));
     break;
@@ -339,6 +342,13 @@ void ASTDumper::dumpIntLiteral(IntegerLiteral *E) {
   OS << "IntegerLiteral ";
   E->getValue().print(OS, /*IsSigned=*/true);
   OS << " : ";
+  dumpTypeName(E->getType());
+  OS << "\n";
+}
+
+void ASTDumper::dumpRealLiteral(RealLiteral *E) {
+  printIndent();
+  OS << "RealLiteral " << E->getRawLiteral() << " : ";
   dumpTypeName(E->getType());
   OS << "\n";
 }

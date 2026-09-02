@@ -61,6 +61,13 @@ public:
 private:
   void identifier(Token &Result);
   void number(Token &Result);
+  /// Scans a real literal scale factor ("E"/"D", optional sign, digits)
+  /// starting just past the exponent letter.  Returns the first character
+  /// after the scale factor.  Reports \p NoDigitsDiag if the exponent has no
+  /// digits, and additionally \p FeatureDiag (if non-zero) for an otherwise
+  /// well-formed scale factor that uses an unsupported feature.
+  const char *scaleFactor(const char *End, unsigned NoDigitsDiag,
+                          unsigned FeatureDiag = 0);
   void string(Token &Result);
   void comment();
 

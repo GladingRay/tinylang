@@ -385,7 +385,8 @@ bool Parser::parseStatement(StmtList &Stmts) {
       if (Tok.is(tok::l_paren)) {
         advance();
         if (Tok.isOneOf(tok::l_paren, tok::plus, tok::minus, tok::kw_NOT,
-                        tok::identifier, tok::integer_literal)) {
+                        tok::identifier, tok::integer_literal,
+                        tok::real_literal)) {
           if (parseExpList(Exprs))
             return _errorhandler();
         }
@@ -482,7 +483,7 @@ bool Parser::parseReturnStatement(StmtList &Stmts) {
   if (consume(tok::kw_RETURN))
     return _errorhandler();
   if (Tok.isOneOf(tok::l_paren, tok::plus, tok::minus, tok::kw_NOT,
-                  tok::identifier, tok::integer_literal)) {
+                  tok::identifier, tok::integer_literal, tok::real_literal)) {
     if (parseExpression(E))
       return _errorhandler();
   }
@@ -531,7 +532,7 @@ bool Parser::parseExpression(std::unique_ptr<Expr> &E) {
 bool Parser::parseRelation(OperatorInfo &Op) {
   auto _errorhandler = [this] {
     return skipUntil(tok::l_paren, tok::plus, tok::minus, tok::kw_NOT,
-                     tok::identifier, tok::integer_literal);
+                     tok::identifier, tok::integer_literal, tok::real_literal);
   };
   if (Tok.is(tok::equal)) {
     Op = fromTok(Tok);
@@ -595,7 +596,7 @@ bool Parser::parseSimpleExpression(std::unique_ptr<Expr> &E) {
 bool Parser::parseAddOperator(OperatorInfo &Op) {
   auto _errorhandler = [this] {
     return skipUntil(tok::l_paren, tok::kw_NOT, tok::identifier,
-                     tok::integer_literal);
+                     tok::integer_literal, tok::real_literal);
   };
   if (Tok.is(tok::plus)) {
     Op = fromTok(Tok);
@@ -638,7 +639,7 @@ bool Parser::parseTerm(std::unique_ptr<Expr> &E) {
 bool Parser::parseMulOperator(OperatorInfo &Op) {
   auto _errorhandler = [this] {
     return skipUntil(tok::l_paren, tok::kw_NOT, tok::identifier,
-                     tok::integer_literal);
+                     tok::integer_literal, tok::real_literal);
   };
   if (Tok.is(tok::star)) {
     Op = fromTok(Tok);
@@ -673,6 +674,9 @@ bool Parser::parseFactor(std::unique_ptr<Expr> &E) {
   if (Tok.is(tok::integer_literal)) {
     E = Actions.actOnIntegerLiteral(Tok.getLocation(), Tok.getLiteralData());
     advance();
+  } else if (Tok.is(tok::real_literal)) {
+    E = Actions.actOnRealLiteral(Tok.getLocation(), Tok.getLiteralData());
+    advance();
   } else if (Tok.is(tok::identifier)) {
     Decl *D;
     ExprList Exprs;
@@ -682,7 +686,8 @@ bool Parser::parseFactor(std::unique_ptr<Expr> &E) {
     if (Tok.is(tok::l_paren)) {
       advance();
       if (Tok.isOneOf(tok::l_paren, tok::plus, tok::minus, tok::kw_NOT,
-                      tok::identifier, tok::integer_literal)) {
+                      tok::identifier, tok::integer_literal,
+                      tok::real_literal)) {
         if (parseExpList(Exprs))
           return _errorhandler();
       }

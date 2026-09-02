@@ -42,6 +42,7 @@ class ASTDumper {
   void dumpInfix(InfixExpression *E);
   void dumpPrefix(PrefixExpression *E);
   void dumpIntLiteral(IntegerLiteral *E);
+  void dumpRealLiteral(RealLiteral *E);
   void dumpBoolLiteral(BooleanLiteral *E);
   void dumpVariableAccess(VariableAccess *E);
   void dumpConstantAccess(ConstantAccess *E);

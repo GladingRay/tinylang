@@ -21,6 +21,7 @@ void CGModule::initialize() {
   Int1Ty = llvm::Type::getInt1Ty(getLLVMCtx());
   Int32Ty = llvm::Type::getInt32Ty(getLLVMCtx());
   Int64Ty = llvm::Type::getInt64Ty(getLLVMCtx());
+  FloatTy = llvm::Type::getFloatTy(getLLVMCtx());
   Int32Zero = llvm::ConstantInt::get(Int32Ty, 0, /*isSigned*/ true);
 }
 
@@ -40,6 +41,8 @@ llvm::Type *CGModule::convertType(TypeDeclaration *Ty) {
   }
   if (Ty->getName() == "INTEGER")
     return Int64Ty;
+  if (Ty->getName() == "REAL")
+    return FloatTy;
   if (Ty->getName() == "BOOLEAN")
     return Int1Ty;
   llvm::report_fatal_error("Unsupported type");
@@ -85,9 +88,13 @@ void CGModule::run(ModuleDeclaration *Mod) {
   for (const auto &Decl : Mod->getDecls()) {
     if (auto *Var = llvm::dyn_cast<VariableDeclaration>(Decl.get())) {
       llvm::Type *Ty = convertType(Var->getType());
-      llvm::Constant *Init = Ty->isAggregateType()
-                                 ? llvm::ConstantAggregateZero::get(Ty)
-                                 : llvm::ConstantInt::get(Ty, 0);
+      llvm::Constant *Init;
+      if (Ty->isAggregateType())
+        Init = llvm::ConstantAggregateZero::get(Ty);
+      else if (Ty->isFloatingPointTy())
+        Init = llvm::ConstantFP::get(Ty, 0.0);
+      else
+        Init = llvm::ConstantInt::get(Ty, 0);
       llvm::GlobalVariable *V = new llvm::GlobalVariable(
           *M, Ty, false,
           llvm::GlobalValue::PrivateLinkage, Init, mangleName(Var));

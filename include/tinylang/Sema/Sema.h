@@ -24,6 +24,7 @@ class Sema {
   DiagnosticsEngine &Diags;
 
   std::unique_ptr<TypeDeclaration> IntegerType;
+  std::unique_ptr<TypeDeclaration> RealType;
   std::unique_ptr<TypeDeclaration> BooleanType;
   std::unique_ptr<ConstantDeclaration> TrueConst;
   std::unique_ptr<ConstantDeclaration> FalseConst;
@@ -86,6 +87,7 @@ public:
   std::unique_ptr<Expr> actOnPrefixExpression(std::unique_ptr<Expr> E,
                                               const OperatorInfo &Op);
   std::unique_ptr<Expr> actOnIntegerLiteral(SMLoc Loc, StringRef Literal);
+  std::unique_ptr<Expr> actOnRealLiteral(SMLoc Loc, StringRef Literal);
   std::unique_ptr<Expr> actOnVariable(Decl *D);
   std::unique_ptr<Expr> actOnIndexedExpression(SMLoc Loc,
                                                std::unique_ptr<Expr> Base,

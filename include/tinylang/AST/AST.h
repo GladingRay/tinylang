@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tinylang/Basic/TokenKinds.h"
+#include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Casting.h"
@@ -274,6 +275,7 @@ public:
     EK_Prefix,
     EK_Int,
     EK_Bool,
+    EK_Real,
     EK_Var,
     EK_Const,
     EK_Func,
@@ -341,6 +343,25 @@ public:
   llvm::APSInt &getValue() { return Value; }
 
   static bool classof(const Expr *E) { return E->getKind() == EK_Int; }
+};
+
+class RealLiteral : public Expr {
+  SMLoc Loc;
+  StringRef RawLiteral;
+  llvm::APFloat Value;
+
+public:
+  RealLiteral(SMLoc Loc, StringRef RawLiteral, const llvm::APFloat &Value,
+              TypeDeclaration *Ty)
+      : Expr(EK_Real, Ty, true), Loc(Loc), RawLiteral(RawLiteral),
+        Value(Value) {}
+
+  /// The exact source text of the literal, e.g. "12.3" or "4.567E8".
+  StringRef getRawLiteral() { return RawLiteral; }
+
+  llvm::APFloat &getValue() { return Value; }
+
+  static bool classof(const Expr *E) { return E->getKind() == EK_Real; }
 };
 
 class BooleanLiteral : public Expr {

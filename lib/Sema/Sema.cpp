@@ -1,5 +1,6 @@
 #include "tinylang/Sema/Sema.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace tinylang;
@@ -46,11 +47,12 @@ bool Sema::isOperatorForType(tok::TokenKind Op, TypeDeclaration *Ty) {
   case tok::plus:
   case tok::minus:
   case tok::star:
+    return Ty == IntegerType.get() || Ty == RealType.get();
   case tok::kw_DIV:
   case tok::kw_MOD:
     return Ty == IntegerType.get();
   case tok::slash:
-    return false; // REAL not implemented
+    return Ty == RealType.get();
   case tok::kw_AND:
   case tok::kw_OR:
   case tok::kw_NOT:
@@ -102,6 +104,7 @@ void Sema::initialize() {
   CurrentDecl = nullptr;
   IntegerType =
       std::make_unique<TypeDeclaration>(CurrentDecl, SMLoc(), "INTEGER");
+  RealType = std::make_unique<TypeDeclaration>(CurrentDecl, SMLoc(), "REAL");
   BooleanType =
       std::make_unique<TypeDeclaration>(CurrentDecl, SMLoc(), "BOOLEAN");
   TrueConst = std::make_unique<ConstantDeclaration>(
@@ -111,6 +114,7 @@ void Sema::initialize() {
       CurrentDecl, SMLoc(), "FALSE",
       std::make_unique<BooleanLiteral>(false, BooleanType.get()));
   CurrentScope->insert(IntegerType.get());
+  CurrentScope->insert(RealType.get());
   CurrentScope->insert(BooleanType.get());
   CurrentScope->insert(TrueConst.get());
   CurrentScope->insert(FalseConst.get());
@@ -473,8 +477,8 @@ Sema::actOnPrefixExpression(std::unique_ptr<Expr> E, const OperatorInfo &Op) {
 
   if (Op.getKind() == tok::minus) {
     bool Ambiguous = true;
-    if (isa<IntegerLiteral>(E.get()) || isa<VariableAccess>(E.get()) ||
-        isa<ConstantAccess>(E.get()))
+    if (isa<IntegerLiteral>(E.get()) || isa<RealLiteral>(E.get()) ||
+        isa<VariableAccess>(E.get()) || isa<ConstantAccess>(E.get()))
       Ambiguous = false;
     else if (auto *Infix = dyn_cast<InfixExpression>(E.get())) {
       tok::TokenKind Kind = Infix->getOperatorInfo().getKind();
@@ -505,6 +509,23 @@ std::unique_ptr<Expr> Sema::actOnIntegerLiteral(SMLoc Loc, StringRef Literal) {
   llvm::APInt Value(64, Literal, Radix);
   return std::make_unique<IntegerLiteral>(Loc, llvm::APSInt(Value, false),
                                           IntegerType.get());
+}
+
+std::unique_ptr<Expr> Sema::actOnRealLiteral(SMLoc Loc, StringRef Literal) {
+  // The lexer guarantees the shape "digits '.' [digits] [E sign digits]".
+  // Parse directly into IEEE single precision so the stored value is the
+  // correctly rounded 32-bit float, not a double-rounded double.  Strings
+  // that cannot be parsed (a malformed exponent, or the D exponent of a
+  // LONGREAL literal that the lexer already diagnosed) become 0.0 so the
+  // compiler never aborts on bad input.
+  llvm::APFloat Value(llvm::APFloat::IEEEsingle());
+  auto ParseResult =
+      Value.convertFromString(Literal, llvm::APFloat::rmNearestTiesToEven);
+  if (!ParseResult) {
+    llvm::consumeError(ParseResult.takeError());
+    Value = llvm::APFloat(0.0f);
+  }
+  return std::make_unique<RealLiteral>(Loc, Literal, Value, RealType.get());
 }
 
 std::unique_ptr<Expr> Sema::actOnVariable(Decl *D) {

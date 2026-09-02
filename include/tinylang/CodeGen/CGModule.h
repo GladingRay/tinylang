@@ -15,6 +15,7 @@ public:
   llvm::Type *Int1Ty;
   llvm::Type *Int32Ty;
   llvm::Type *Int64Ty;
+  llvm::Type *FloatTy;
   llvm::Constant *Int32Zero;
 
   /// Counters used to generate unique basic block names for if and while

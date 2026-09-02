@@ -18,11 +18,13 @@ tinylang 实现的是 Modula-2 的一个实用子集：
   - `PROCEDURE` 过程/函数，支持形参、`VAR` 引用参数和返回类型（包括数组与记录）
 - **语句**：赋值 `:=`、过程调用、`IF`/`THEN`/`ELSE`/`END`、`WHILE`/`DO`/`END`、`RETURN`
 - **表达式**：算术运算 `+ - * / DIV MOD`、关系运算 `= # < <= > >=`、逻辑运算 `AND OR NOT`
-- **字面量**：十进制整数 `123`、十六进制整数 `123H`；字符串/字符字面量目前仅由词法分析器识别
+- **字面量**：十进制整数 `123`、十六进制整数 `123H`、带小数点与可选 `E` 指数的实数（`12.3`、`4.567E8`、`1.0E-3`）；字符串/字符字面量目前仅由词法分析器识别
 - **注释**：嵌套块注释 `(* ... (* ... *) ... *)`
-- **内建类型**：`INTEGER`、`BOOLEAN`
+- **内建类型**：`INTEGER`、`REAL`、`BOOLEAN`
 
 记录字段支持嵌套，可与数组下标组合（`a[i].f`、`r.f[k]`），记录支持整体赋值；类型别名会被透明地解析为底层类型。
+
+`REAL` 遵循 Modula-2 语义：它是 32 位 IEEE 单精度（single）浮点类型族，`/` 表示实数除法，`+ - *` 可作用于 `REAL` 操作数（`DIV`、`MOD` 与逻辑运算仍只属于 `INTEGER`/`BOOLEAN`）。与（ISO）Modula-2 一致，`REAL` 与 `INTEGER` 之间既不存在赋值兼容也不存在表达式兼容，混用会在编译期报错；在实现 `FLOAT`/`TRUNC` 等显式转换函数之前，需要先转换再参与运算。
 
 ### 示例
 
@@ -48,7 +50,7 @@ END GCD;
 END Gcd.
 ```
 
-更多示例见 `example/`：`Gcd.mod`、`Fib.mod`、`Arrays.mod`、`TypeAlias.mod`、`Record.mod`、`ReturnRecord.mod`、`ReturnArray.mod`，每个都配有对应的 `call*.c` 验证程序。
+更多示例见 `example/`：`Gcd.mod`、`Fib.mod`、`Arrays.mod`、`TypeAlias.mod`、`Record.mod`、`Real.mod`、`ReturnRecord.mod`、`ReturnArray.mod`，每个都配有对应的 `call*.c` 验证程序。
 
 ## 当前进度
 
@@ -62,8 +64,8 @@ END Gcd.
 | Driver | ✅ 已完成 | `tinylang` 可执行文件：解析、诊断、输出 IR/汇编 |
 | ASTDumper | ✅ 已完成 | `tinylang-astdump` 工具，打印 AST |
 | 构建系统 | ✅ 已完成 | CMake + `find_package(LLVM)`、C++17、按模块拆分静态库 |
-| 测试 | ✅ 已完成 | `test/` 下的诊断回归测试（26 个 `.mod` 用例）以及端到端示例 |
-| 代码生成 | ✅ 已完成 | 函数、控制流、全局变量、数组、记录、类型别名与聚合类型返回值 |
+| 测试 | ✅ 已完成 | `test/` 下的诊断回归测试（30 个 `.mod` 用例）以及端到端示例 |
+| 代码生成 | ✅ 已完成 | 函数、控制流、全局变量、数组、记录、类型别名、`REAL`（32 位 float）算术与聚合类型返回值 |
 
 已知限制：`IMPORT` 尚未实现；模块体的语句会被解析但暂不生成代码。
 
@@ -147,13 +149,13 @@ cc /tmp/Record.o /tmp/callrecord.o -o /tmp/callrecord
 /tmp/callrecord
 ```
 
-`Gcd`、`Fib`、`Arrays`、`TypeAlias` 的 `call*.c` 验证程序采用同样的流程。
+`Gcd`、`Fib`、`Arrays`、`TypeAlias`、`Real` 的 `call*.c` 验证程序采用同样的流程。
 
 ## 设计要点
 
 - **`.def` 文件驱动的表驱动模式**：`TokenKinds.def` 与 `Diagnostic.def` 通过宏展开被多次包含，分别生成枚举、名称表、拼写表与诊断消息表。
 - **诊断引擎**：`DiagnosticsEngine` 封装 `llvm::SourceMgr`，携带源码位置（`SMLoc`）与错误计数，支持格式化消息。
-- **词法分析**：关键字通过 `llvm::StringMap` 匹配；数字支持十进制与 `H` 后缀十六进制；注释支持嵌套。
+- **词法分析**：关键字通过 `llvm::StringMap` 匹配；数字支持十进制与 `H` 后缀十六进制整数，以及实数（`digits.digits[E[+|-]digits]`；`LONGREAL` 的 `D` 指数会报“未实现”诊断）；注释支持嵌套。
 - **AST**：采用 LLVM 风格的多态类层次，通过 `classof()` 支持 `isa`/`cast` 风格的向下转型。
 - **语义分析**：`Scope` 用 `llvm::StringMap` 实现符号表，`EnterDeclScope` 以 RAII 方式管理作用域，`Sema` 通过 `actOn*` 回调与 Parser 解耦。
 - **代码生成**：`CGModule`/`CGProcedure` 使用 `llvm::IRBuilder`。标量局部变量走 SSA 并构造 phi 节点；数组/记录等聚合类型保存在内存中并用 GEP 访问；record/数组整体赋值生成 `memcpy`；聚合类型返回值通过临时 alloca 保存；符号按 `_t<长度><名字>` 规则混淆。
@@ -167,6 +169,7 @@ cc /tmp/Record.o /tmp/callrecord.o -o /tmp/callrecord
 - [x] 代码生成：AST → LLVM IR → 目标汇编
 - [x] 静态数组与记录
 - [x] 类型别名
+- [x] `REAL`（浮点）类型
 - [x] AST dump 工具
 - [ ] 模块导入（`IMPORT`）与模块体语句
 - [ ] 变体记录、`WITH`、`SET`、指针类型

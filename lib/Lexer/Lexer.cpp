@@ -151,6 +151,26 @@ void Lexer::number(Token &Result) {
     Kind = tok::integer_literal;
     ++End;
     break;
+  case '.': /* real number: digit {digit} "." {digit} [scale factor] */
+    if (*(End + 1) == '.') {
+      // "1..2" is an INTEGER followed by the ".." range operator.
+      if (IsHex)
+        Diags.report(getLoc(), diag::err_hex_digit_in_decimal);
+      Kind = tok::integer_literal;
+      break;
+    }
+    if (IsHex)
+      Diags.report(getLoc(), diag::err_hex_digit_in_decimal);
+    ++End; // consume '.'
+    while (charinfo::isDigit(*End))
+      ++End;
+    if (*End == 'E' || *End == 'e')
+      End = scaleFactor(End, diag::err_invalid_real_literal);
+    else if (*End == 'D' || *End == 'd')
+      End = scaleFactor(End, diag::err_invalid_real_literal,
+                        diag::err_longreal_literal_not_implemented);
+    Kind = tok::real_literal;
+    break;
   default: /* decimal number */
     if (IsHex)
       Diags.report(getLoc(),
@@ -159,6 +179,22 @@ void Lexer::number(Token &Result) {
     break;
   }
   formToken(Result, End, Kind);
+}
+
+const char *Lexer::scaleFactor(const char *End, unsigned NoDigitsDiag,
+                               unsigned FeatureDiag) {
+  const char *ExpEnd = End + 1; // skip 'E' or 'D'
+  if (*ExpEnd == '+' || *ExpEnd == '-')
+    ++ExpEnd;
+  if (!charinfo::isDigit(*ExpEnd)) {
+    Diags.report(getLoc(), NoDigitsDiag);
+    return ExpEnd;
+  }
+  if (FeatureDiag)
+    Diags.report(getLoc(), FeatureDiag);
+  while (charinfo::isDigit(*ExpEnd))
+    ++ExpEnd;
+  return ExpEnd;
 }
 
 void Lexer::string(Token &Result) {

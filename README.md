@@ -18,11 +18,13 @@ tinylang implements a practical subset of Modula-2:
   - `PROCEDURE` procedures/functions with formal parameters, `VAR` reference parameters, and return types (including arrays and records)
 - **Statements**: assignment `:=`, procedure calls, `IF`/`THEN`/`ELSE`/`END`, `WHILE`/`DO`/`END`, `RETURN`
 - **Expressions**: arithmetic `+ - * / DIV MOD`, relational `= # < <= > >=`, logical `AND OR NOT`
-- **Literals**: decimal integers `123`, hexadecimal integers `123H`; string/char literals are recognized by the lexer
+- **Literals**: decimal integers `123`, hexadecimal integers `123H`, real literals with a decimal point and optional `E` exponent (`12.3`, `4.567E8`, `1.0E-3`); string/char literals are recognized by the lexer
 - **Comments**: nested block comments `(* ... (* ... *) ... *)`
-- **Built-in types**: `INTEGER`, `BOOLEAN`
+- **Built-in types**: `INTEGER`, `REAL`, `BOOLEAN`
 
 Record fields can be nested, combined with array indexing (`a[i].f`, `r.f[k]`), and records support whole-value assignment. Type aliases are transparently resolved to their underlying type.
+
+`REAL` follows Modula-2 semantics: it is a 32-bit IEEE single-precision floating-point type of its own family, `/` performs real division, and `+ - *` work on `REAL` operands (`DIV`, `MOD` and the logical operators stay with `INTEGER`/`BOOLEAN`). As in (ISO) Modula-2, `REAL` and `INTEGER` are neither assignment- nor expression-compatible, so mixing them is a compile-time error until explicit conversion functions such as `FLOAT`/`TRUNC` are implemented.
 
 ### Example
 
@@ -48,7 +50,7 @@ END GCD;
 END Gcd.
 ```
 
-More examples live in `example/`: `Gcd.mod`, `Fib.mod`, `Arrays.mod`, `TypeAlias.mod`, `Record.mod`, `ReturnRecord.mod`, and `ReturnArray.mod`, each with a matching `call*.c` harness.
+More examples live in `example/`: `Gcd.mod`, `Fib.mod`, `Arrays.mod`, `TypeAlias.mod`, `Record.mod`, `Real.mod`, `ReturnRecord.mod`, and `ReturnArray.mod`, each with a matching `call*.c` harness.
 
 ## Current Status
 
@@ -62,8 +64,8 @@ More examples live in `example/`: `Gcd.mod`, `Fib.mod`, `Arrays.mod`, `TypeAlias
 | Driver | ✅ Done | `tinylang` executable; parse, diagnose, emit IR/assembly |
 | ASTDumper | ✅ Done | `tinylang-astdump` tool for printing the AST |
 | Build system | ✅ Done | CMake + `find_package(LLVM)`, C++17, per-module libraries |
-| Testing | ✅ Done | diagnostic regression tests under `test/` (26 `.mod` cases) plus end-to-end examples |
-| Code generation | ✅ Done | functions, control flow, globals, arrays, records, type aliases, aggregate return values |
+| Testing | ✅ Done | diagnostic regression tests under `test/` (30 `.mod` cases) plus end-to-end examples |
+| Code generation | ✅ Done | functions, control flow, globals, arrays, records, type aliases, `REAL` (32-bit float) arithmetic, aggregate return values |
 
 Known limitations: `IMPORT` is not implemented yet and module body statements are parsed but not yet emitted.
 
@@ -147,13 +149,13 @@ cc /tmp/Record.o /tmp/callrecord.o -o /tmp/callrecord
 /tmp/callrecord
 ```
 
-The same pattern is used by the `call*.c` harnesses for `Gcd`, `Fib`, `Arrays`, and `TypeAlias`.
+The same pattern is used by the `call*.c` harnesses for `Gcd`, `Fib`, `Arrays`, `TypeAlias`, and `Real`.
 
 ## Design Notes
 
 - **Table-driven `.def` files**: `TokenKinds.def` and `Diagnostic.def` are included multiple times with different macros to generate enums, name tables, spelling tables, and diagnostic tables.
 - **Diagnostics engine**: `DiagnosticsEngine` wraps `llvm::SourceMgr`, tracks source locations (`SMLoc`) and an error count, and supports formatted messages.
-- **Lexer**: keywords are matched with an `llvm::StringMap`; numbers support decimal and `H`-suffixed hexadecimal literals; comments nest.
+- **Lexer**: keywords are matched with an `llvm::StringMap`; numbers support decimal and `H`-suffixed hexadecimal integers plus real literals (`digits.digits[E[+|-]digits]`; the `D` scale factor of `LONGREAL` is diagnosed as unimplemented); comments nest.
 - **AST**: LLVM-style polymorphic class hierarchy with `isa`/`cast`-style downcasting via `classof()`.
 - **Semantic analysis**: `Scope` implements the symbol table; `EnterDeclScope` uses RAII; `Sema` is decoupled from the parser through `actOn*` callbacks.
 - **Code generation**: `CGModule`/`CGProcedure` use `llvm::IRBuilder`. Scalar locals use SSA with phi construction; aggregates (arrays/records) are kept in memory and accessed with GEP; record/array assignment lowers to `memcpy`; aggregate return values are spilled through a temporary alloca; symbols are mangled with `_t<len><name>`.
@@ -167,6 +169,7 @@ The same pattern is used by the `call*.c` harnesses for `Gcd`, `Fib`, `Arrays`, 
 - [x] Code generation: AST → LLVM IR → target assembly
 - [x] Static arrays and records
 - [x] Type aliases
+- [x] `REAL` (floating point) type
 - [x] AST dump tool
 - [ ] Module imports (`IMPORT`) and module body statements
 - [ ] Variant records, `WITH`, `SET`, pointer types
