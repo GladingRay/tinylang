@@ -33,9 +33,12 @@ llvm::Type *CGModule::convertType(TypeDeclaration *Ty) {
         static_cast<uint64_t>(ArrTy->getNumElements()));
   if (auto *RecTy = llvm::dyn_cast<RecordTypeDeclaration>(Ty)) {
     llvm::SmallVector<llvm::Type *, 8> FieldTypes;
-    for (const auto &F : RecTy->getFields())
-      FieldTypes.push_back(
-          convertType(llvm::cast<VariableDeclaration>(F.get())->getType()));
+    // Extended records start with the type descriptor pointer so that a
+    // derived record can be viewed as its base type.
+    if (RecTy->hasTypeTag())
+      FieldTypes.push_back(llvm::PointerType::get(getLLVMCtx(), 0));
+    for (auto *F : RecTy->getAllFields())
+      FieldTypes.push_back(convertType(F->getType()));
     return llvm::StructType::get(getLLVMCtx(), FieldTypes,
                                  /*isPacked=*/false);
   }
@@ -49,6 +52,14 @@ llvm::Type *CGModule::convertType(TypeDeclaration *Ty) {
 }
 
 std::string CGModule::mangleName(Decl *D) {
+  // Type-bound procedures are distinguished by their receiver type.
+  if (auto *Proc = llvm::dyn_cast<ProcedureDeclaration>(D))
+    if (auto *Receiver = Proc->getReceiver()) {
+      auto *RecTy = llvm::cast<RecordTypeDeclaration>(
+          getUnderlyingType(Receiver->getType()));
+      return mangleName(Proc->getEnclosingDecl()) + "T" +
+             llvm::Twine(getTypeId(RecTy)).str() + Proc->getName().str();
+    }
   std::string Mangled("_t");
   llvm::SmallVector<llvm::StringRef, 4> Parts;
   for (; D; D = D->getEnclosingDecl())
@@ -61,6 +72,69 @@ std::string CGModule::mangleName(Decl *D) {
 }
 
 llvm::GlobalObject *CGModule::getGlobal(Decl *D) { return Globals[D]; }
+
+unsigned CGModule::getTypeId(TypeDeclaration *Ty) {
+  auto It = TypeIds.find(Ty);
+  if (It != TypeIds.end())
+    return It->second;
+  unsigned Id = TypeIds.size();
+  TypeIds[Ty] = Id;
+  return Id;
+}
+
+llvm::GlobalVariable *
+CGModule::getTypeDescriptor(RecordTypeDeclaration *Ty) {
+  auto It = TypeDescriptors.find(Ty);
+  if (It != TypeDescriptors.end())
+    return It->second;
+
+  llvm::SmallVector<llvm::Constant *, 8> Impls;
+  for (auto *Method : collectMethodSlots(Ty)) {
+    llvm::Function *Fn = M->getFunction(mangleName(Method));
+    if (!Fn)
+      Fn = CGProcedure(*this).declareFunction(Method);
+    Impls.push_back(Fn);
+  }
+  llvm::ArrayType *DescTy = llvm::ArrayType::get(
+      llvm::PointerType::get(getLLVMCtx(), 0), Impls.size());
+  auto *Desc = new llvm::GlobalVariable(
+      *M, DescTy, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+      llvm::ConstantArray::get(DescTy, Impls),
+      llvm::Twine(mangleName(Mod)) + "T" + llvm::Twine(getTypeId(Ty)) +
+          "desc");
+  TypeDescriptors[Ty] = Desc;
+  return Desc;
+}
+
+llvm::Constant *CGModule::getZeroValue(TypeDeclaration *Ty) {
+  llvm::Type *LLVMTy = convertType(Ty);
+  TypeDeclaration *Underlying = getUnderlyingType(Ty);
+  if (auto *RecTy = llvm::dyn_cast<RecordTypeDeclaration>(Underlying)) {
+    if (!RecTy->hasTypeTag())
+      return llvm::ConstantAggregateZero::get(LLVMTy);
+    llvm::SmallVector<llvm::Constant *, 8> Fields;
+    Fields.push_back(getTypeDescriptor(RecTy));
+    for (auto *F : RecTy->getAllFields())
+      Fields.push_back(getZeroValue(F->getType()));
+    return llvm::ConstantStruct::get(llvm::cast<llvm::StructType>(LLVMTy),
+                                     Fields);
+  }
+  if (auto *ArrTy = llvm::dyn_cast<ArrayTypeDeclaration>(Underlying)) {
+    auto *ElemTy =
+        llvm::dyn_cast<RecordTypeDeclaration>(getUnderlyingType(
+            ArrTy->getElementType()));
+    if (!ElemTy || !ElemTy->hasTypeTag())
+      return llvm::ConstantAggregateZero::get(LLVMTy);
+    llvm::SmallVector<llvm::Constant *, 8> Elems(
+        static_cast<size_t>(ArrTy->getNumElements()),
+        getZeroValue(ArrTy->getElementType()));
+    return llvm::ConstantArray::get(llvm::cast<llvm::ArrayType>(LLVMTy),
+                                    Elems);
+  }
+  if (LLVMTy->isFloatingPointTy())
+    return llvm::ConstantFP::get(LLVMTy, 0.0);
+  return llvm::ConstantInt::get(LLVMTy, 0);
+}
 
 #ifdef TINYLANG_ENABLE_IR_DUMP
 void CGModule::dump() {
@@ -82,30 +156,32 @@ void CGModule::dump() {
 
 void CGModule::run(ModuleDeclaration *Mod) {
   this->Mod = Mod;
-  // First pass: emit module-level variables and declare all procedures so
-  // that calls can reference them regardless of declaration order (this also
-  // makes recursive and mutually recursive calls work).
+  // First pass: declare all procedures so that calls and type descriptors can
+  // reference them regardless of declaration order (this also makes
+  // recursive and mutually recursive calls work).
+  for (const auto &Decl : Mod->getDecls()) {
+    if (auto *Proc = llvm::dyn_cast<ProcedureDeclaration>(Decl.get()))
+      // Methods declared inside a record body have no implementation here.
+      if (!Proc->isMethodDeclaration())
+        CGProcedure(*this).declareFunction(Proc);
+  }
+  // Second pass: module-level variables.  Records taking part in type
+  // extension store their type descriptor in the first component.
   for (const auto &Decl : Mod->getDecls()) {
     if (auto *Var = llvm::dyn_cast<VariableDeclaration>(Decl.get())) {
       llvm::Type *Ty = convertType(Var->getType());
-      llvm::Constant *Init;
-      if (Ty->isAggregateType())
-        Init = llvm::ConstantAggregateZero::get(Ty);
-      else if (Ty->isFloatingPointTy())
-        Init = llvm::ConstantFP::get(Ty, 0.0);
-      else
-        Init = llvm::ConstantInt::get(Ty, 0);
       llvm::GlobalVariable *V = new llvm::GlobalVariable(
           *M, Ty, false,
-          llvm::GlobalValue::PrivateLinkage, Init, mangleName(Var));
+          llvm::GlobalValue::PrivateLinkage, getZeroValue(Var->getType()),
+          mangleName(Var));
       Globals[Var] = V;
-    } else if (auto *Proc = llvm::dyn_cast<ProcedureDeclaration>(Decl.get())) {
-      CGProcedure(*this).declareFunction(Proc);
     }
   }
-  // Second pass: emit the procedure bodies.
+  // Third pass: emit the procedure bodies.
   for (const auto &Decl : Mod->getDecls()) {
     if (auto *Proc = llvm::dyn_cast<ProcedureDeclaration>(Decl.get())) {
+      if (Proc->isMethodDeclaration())
+        continue;
       CGProcedure CGP(*this);
       CGP.run(Proc);
     }

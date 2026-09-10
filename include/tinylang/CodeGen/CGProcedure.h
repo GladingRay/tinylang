@@ -78,6 +78,13 @@ protected:
 
   llvm::Value *emitExpr(Expr *E);
 
+  /// Dynamic dispatch of a type-bound procedure through the receiver's type
+  /// descriptor.
+  llvm::Value *emitMethodCall(MethodCallExpr *E);
+
+  /// Dynamic type test "v IS T": compares the receiver's type descriptor.
+  llvm::Value *emitTypeTest(TypeTestExpr *E);
+
   llvm::Value *emitLValue(Expr *E);
   llvm::Value *emitLValue(IndexedExpression *E);
   llvm::Value *emitLValue(FieldAccess *E);
@@ -87,6 +94,8 @@ protected:
   void emitStmt(AssignmentStatement *Stmt);
 
   void emitStmt(ProcedureCallStatement *Stmt);
+
+  void emitStmt(MethodCallStatement *Stmt);
 
   void emitStmt(IfStatement *Stmt);
 

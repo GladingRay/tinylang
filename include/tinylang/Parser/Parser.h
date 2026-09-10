@@ -65,7 +65,8 @@ class Parser {
   bool parseVariableDeclaration(DeclList &Decls);
   bool parseType(Decl *&D);
   bool parseRecordType(Decl *&D);
-  bool parseFieldList(DeclList &Fields);
+  bool parseRecordBody(DeclList &Fields, DeclList &Methods);
+  bool parseMethodDeclaration(DeclList &Methods);
   bool parseProcedureDeclaration(DeclList &ParentDecls);
   bool parseFormalParameters(FormalParamList &Params, Decl *&RetType,
                              SMLoc &RetTypeLoc);

@@ -11,6 +11,13 @@ static StringRef getOperatorSpelling(tok::TokenKind Kind) {
   return tok::getKeywordSpelling(Kind);
 }
 
+/// A designator is an expression that denotes a variable: a variable, a
+/// record field or an array element (possibly nested).
+static bool isDesignator(Expr *E) {
+  return isa<VariableAccess>(E) || isa<FieldAccess>(E) ||
+         isa<IndexedExpression>(E);
+}
+
 static bool evalConstInt(Expr *E, int64_t &Value) {
   if (auto *Lit = dyn_cast_or_null<IntegerLiteral>(E)) {
     Value = Lit->getValue().getSExtValue();
@@ -63,6 +70,8 @@ bool Sema::isOperatorForType(tok::TokenKind Op, TypeDeclaration *Ty) {
 }
 
 bool Sema::isSameType(TypeDeclaration *LHS, TypeDeclaration *RHS) {
+  if (!LHS || !RHS)
+    return LHS == RHS;
   LHS = getUnderlyingType(LHS);
   RHS = getUnderlyingType(RHS);
   if (LHS == RHS)
@@ -75,20 +84,60 @@ bool Sema::isSameType(TypeDeclaration *LHS, TypeDeclaration *RHS) {
   return false;
 }
 
+bool Sema::isCompatibleWithFormal(TypeDeclaration *Actual,
+                                  TypeDeclaration *Formal, bool IsVar) {
+  if (isSameType(Actual, Formal))
+    return true;
+  if (!Actual || !Formal)
+    return false;
+  // Oberon-2 style polymorphism: a VAR parameter of a base record type
+  // accepts variables of any type extending it.
+  if (!IsVar)
+    return false;
+  auto *ActualRec =
+      dyn_cast<RecordTypeDeclaration>(getUnderlyingType(Actual));
+  auto *FormalRec =
+      dyn_cast<RecordTypeDeclaration>(getUnderlyingType(Formal));
+  if (!ActualRec || !FormalRec)
+    return false;
+  return isExtensionOf(ActualRec, FormalRec);
+}
+
+bool Sema::hasSameSignature(ProcedureDeclaration *LHS,
+                            ProcedureDeclaration *RHS) {
+  const FormalParamList &L = LHS->getFormalParams();
+  const FormalParamList &R = RHS->getFormalParams();
+  size_t LStart = (!L.empty() && L.front()->isReceiver()) ? 1 : 0;
+  size_t RStart = (!R.empty() && R.front()->isReceiver()) ? 1 : 0;
+  if (L.size() - LStart != R.size() - RStart)
+    return false;
+  if (!isSameType(LHS->getRetType(), RHS->getRetType()))
+    return false;
+  for (size_t I = 0; I + LStart < L.size(); ++I)
+    if (!isSameType(L[I + LStart]->getType(), R[I + RStart]->getType()))
+      return false;
+  return true;
+}
+
 void Sema::checkFormalAndActualParameters(SMLoc Loc,
                                           const FormalParamList &Formals,
                                           const ExprList &Actuals) {
-  if (Formals.size() != Actuals.size()) {
+  // The implicit receiver of a type-bound procedure is not an actual
+  // parameter supplied by the caller.
+  unsigned FirstFormal =
+      (!Formals.empty() && Formals.front()->isReceiver()) ? 1 : 0;
+  if (Formals.size() != Actuals.size() + FirstFormal) {
     Diags.report(Loc, diag::err_wrong_number_of_parameters);
     return;
   }
   auto A = Actuals.begin();
-  for (auto I = Formals.begin(), E = Formals.end(); I != E; ++I, ++A) {
+  for (auto I = Formals.begin() + FirstFormal, E = Formals.end(); I != E;
+       ++I, ++A) {
     FormalParameterDeclaration *F = I->get();
     Expr *Arg = A->get();
     if (!Arg)
       continue;
-    if (!isSameType(F->getType(), Arg->getType()))
+    if (!isCompatibleWithFormal(Arg->getType(), F->getType(), F->isVar()))
       Diags.report(
           Loc, diag::err_type_of_formal_and_actual_parameter_not_compatible);
     bool IsLValue = isa<VariableAccess>(Arg) || isa<IndexedExpression>(Arg) ||
@@ -135,6 +184,12 @@ void Sema::actOnModuleDeclaration(ModuleDeclaration *ModDecl, SMLoc Loc,
   }
   ModDecl->setDecls(std::move(Decls));
   ModDecl->setStmts(std::move(Stmts));
+
+  // Every method declared inside a record body needs an implementation.
+  for (auto *Method : DeclaredMethods)
+    if (!Method->getDefinition())
+      Diags.report(Method->getLocation(), diag::err_method_not_implemented,
+                   Method->getName());
 }
 
 void Sema::actOnImport(StringRef ModuleName, IdentList &Ids) {
@@ -162,6 +217,10 @@ void Sema::actOnTypeDeclaration(DeclList &Decls, SMLoc Loc, StringRef Name,
   }
   auto Decl = std::make_unique<TypeAliasDeclaration>(CurrentDecl, Loc, Name,
                                                      Aliased);
+  // Give an anonymous record or array type the name it is declared under, so
+  // diagnostics and AST dumps can refer to it.
+  if (Aliased->getName().empty() && !isa<TypeAliasDeclaration>(Aliased))
+    Aliased->setName(Name);
   if (CurrentScope->insert(Decl.get()))
     Decls.push_back(std::move(Decl));
   else
@@ -189,12 +248,84 @@ TypeDeclaration *Sema::actOnArrayType(SMLoc Loc, std::unique_ptr<Expr> Low,
   return Result;
 }
 
-TypeDeclaration *Sema::actOnRecordType(SMLoc Loc, DeclList Fields) {
+TypeDeclaration *Sema::actOnRecordType(SMLoc Loc, Decl *BaseType,
+                                       DeclList Fields, DeclList Methods) {
+  TypeDeclaration *Base = nullptr;
+  if (BaseType) {
+    Base = dyn_cast<TypeDeclaration>(BaseType);
+    if (!Base ||
+        !isa<RecordTypeDeclaration>(getUnderlyingType(Base))) {
+      Diags.report(Loc, diag::err_extended_record_base_must_be_record);
+      Base = nullptr;
+    }
+  }
+  // A record that extends another one is represented by a prefix-compatible
+  // struct, so both types carry the type descriptor pointer.
+  auto *BaseRec = Base ? dyn_cast<RecordTypeDeclaration>(getUnderlyingType(Base))
+                       : nullptr;
+  if (BaseRec)
+    BaseRec->setHasTypeTag();
   auto RecTy = std::make_unique<RecordTypeDeclaration>(
-      CurrentDecl, Loc, StringRef(), std::move(Fields));
+      CurrentDecl, Loc, StringRef(), BaseRec, std::move(Fields));
+  if (BaseRec)
+    RecTy->setHasTypeTag();
+  for (const auto &F : RecTy->getFields()) {
+    if (BaseRec && BaseRec->lookupField(F->getName()))
+      Diags.report(F->getLocation(), diag::err_field_conflicts_with_base,
+                   F->getName());
+  }
+  // Methods declared in the record body get an implicit receiver of the
+  // record type and are implemented outside of it.
+  RecTy->setMethodDecls(std::move(Methods));
+  for (const auto &MD : RecTy->getMethodDecls()) {
+    auto *Method = cast<ProcedureDeclaration>(MD.get());
+    Method->setReceiver(std::make_unique<FormalParameterDeclaration>(
+        Method, Method->getLocation(), "self", RecTy.get(),
+        /*IsVar=*/true, /*IsReceiver=*/true));
+    bool Ok = true;
+    for (auto *Own : RecTy->getMethods()) {
+      if (Own->getName() == Method->getName()) {
+        Diags.report(Method->getLocation(), diag::err_duplicate_method,
+                     Method->getName());
+        Ok = false;
+        break;
+      }
+    }
+    if (Ok)
+      if (ProcedureDeclaration *Inherited =
+              lookupMethod(RecTy.get(), Method->getName()))
+        if (!hasSameSignature(Inherited, Method)) {
+          Diags.report(Method->getLocation(),
+                       diag::err_method_signature_mismatch,
+                       Method->getName());
+          Ok = false;
+        }
+    if (!Ok)
+      continue;
+    RecTy->addMethod(Method);
+    DeclaredMethods.push_back(Method);
+  }
   TypeDeclaration *Result = RecTy.get();
   OwnedTypes.push_back(std::move(RecTy));
   return Result;
+}
+
+std::unique_ptr<ProcedureDeclaration>
+Sema::actOnMethodDeclaration(SMLoc Loc, StringRef Name) {
+  auto Proc = std::make_unique<ProcedureDeclaration>(CurrentDecl, Loc, Name);
+  Proc->setMethodDeclaration();
+  return Proc;
+}
+
+void Sema::actOnMethodDeclaration(ProcedureDeclaration *ProcDecl,
+                                  FormalParamList Params, Decl *RetType,
+                                  SMLoc RetTypeLoc) {
+  ProcDecl->setFormalParams(std::move(Params));
+  auto *RetTypeDecl = dyn_cast_or_null<TypeDeclaration>(RetType);
+  if (!RetTypeDecl && RetType)
+    Diags.report(RetTypeLoc, diag::err_returntype_must_be_type);
+  else if (RetTypeDecl)
+    ProcDecl->setRetType(RetTypeDecl);
 }
 
 void Sema::actOnVariableDeclaration(DeclList &Decls, IdentList &Ids, Decl *D) {
@@ -270,11 +401,33 @@ void Sema::actOnFormalParameterDeclaration(FormalParamList &Params,
 }
 
 std::unique_ptr<ProcedureDeclaration>
-Sema::actOnProcedureDeclaration(SMLoc Loc, StringRef Name) {
+Sema::actOnProcedureDeclaration(SMLoc Loc, StringRef Name, bool IsMethod) {
   auto P = std::make_unique<ProcedureDeclaration>(CurrentDecl, Loc, Name);
-  if (!CurrentScope->insert(P.get()))
+  // Type-bound procedures live in the method table of their receiver type,
+  // not in the enclosing scope.
+  if (!IsMethod && !CurrentScope->insert(P.get()))
     Diags.report(Loc, diag::err_symbold_declared, Name);
   return P;
+}
+
+void Sema::actOnReceiverParameter(ProcedureDeclaration *ProcDecl, SMLoc Loc,
+                                  StringRef Name, Decl *D,
+                                  FormalParamList &Params) {
+  assert(CurrentScope && "CurrentScope not set");
+  auto *Ty = dyn_cast_or_null<TypeDeclaration>(D);
+  auto *RecTy =
+      Ty ? dyn_cast<RecordTypeDeclaration>(getUnderlyingType(Ty)) : nullptr;
+  if (!RecTy) {
+    Diags.report(Loc, diag::err_receiver_requires_record);
+    return;
+  }
+  RecTy->setHasTypeTag();
+  auto Param = std::make_unique<FormalParameterDeclaration>(
+      ProcDecl, Loc, Name, RecTy, /*IsVar=*/true, /*IsReceiver=*/true);
+  if (CurrentScope->insert(Param.get()))
+    Params.push_back(std::move(Param));
+  else
+    Diags.report(Loc, diag::err_symbold_declared, Name);
 }
 
 void Sema::actOnProcedureHeading(ProcedureDeclaration *ProcDecl,
@@ -286,6 +439,41 @@ void Sema::actOnProcedureHeading(ProcedureDeclaration *ProcDecl,
     Diags.report(RetTypeLoc, diag::err_returntype_must_be_type);
   else if (RetTypeDecl) {
     ProcDecl->setRetType(RetTypeDecl);
+  }
+
+  // Register a type-bound procedure with its receiver type, checking that an
+  // override matches the inherited signature.
+  if (FormalParameterDeclaration *Receiver = ProcDecl->getReceiver()) {
+    auto *RecTy = dyn_cast<RecordTypeDeclaration>(
+        getUnderlyingType(Receiver->getType()));
+    RecTy->setHasTypeTag();
+    // The implementation of a method declared inside the record body.
+    for (auto *Own : RecTy->getMethods()) {
+      if (Own->getName() != ProcDecl->getName())
+        continue;
+      if (!Own->isMethodDeclaration()) {
+        Diags.report(ProcDecl->getLocation(), diag::err_duplicate_method,
+                     ProcDecl->getName());
+        return;
+      }
+      if (!hasSameSignature(Own, ProcDecl)) {
+        Diags.report(ProcDecl->getLocation(),
+                     diag::err_method_signature_mismatch,
+                     ProcDecl->getName());
+      }
+      Own->setDefinition(ProcDecl);
+      RecTy->replaceMethod(Own, ProcDecl);
+      return;
+    }
+    if (ProcedureDeclaration *Inherited =
+            lookupMethod(RecTy, ProcDecl->getName())) {
+      if (!hasSameSignature(Inherited, ProcDecl)) {
+        Diags.report(ProcDecl->getLocation(),
+                     diag::err_method_signature_mismatch, ProcDecl->getName());
+        return;
+      }
+    }
+    RecTy->addMethod(ProcDecl);
   }
 }
 
@@ -338,6 +526,10 @@ void Sema::actOnProcCall(StmtList &Stmts, SMLoc Loc, Decl *D,
   if (!D)
     return;
   if (auto Proc = dyn_cast<ProcedureDeclaration>(D)) {
+    if (Proc->isMethod()) {
+      Diags.report(Loc, diag::err_method_requires_receiver, Proc->getName());
+      return;
+    }
     checkFormalAndActualParameters(Loc, Proc->getFormalParams(), Params);
     if (Proc->getRetType())
       Diags.report(Loc, diag::err_procedure_call_on_nonprocedure);
@@ -561,7 +753,7 @@ std::unique_ptr<Expr> Sema::actOnIndexedExpression(SMLoc Loc,
 std::unique_ptr<Expr> Sema::actOnFieldAccess(SMLoc Loc,
                                              std::unique_ptr<Expr> Base,
                                              StringRef Name) {
-  if (!Base)
+  if (!Base || !Base->getType())
     return nullptr;
   auto *RecTy =
       dyn_cast<RecordTypeDeclaration>(getUnderlyingType(Base->getType()));
@@ -575,11 +767,80 @@ std::unique_ptr<Expr> Sema::actOnFieldAccess(SMLoc Loc,
   return nullptr;
 }
 
+std::unique_ptr<Expr>
+Sema::actOnMethodCall(SMLoc Loc, std::unique_ptr<Expr> Receiver,
+                      StringRef Name, ExprList Params) {
+  if (!Receiver)
+    return nullptr;
+  if (!isDesignator(Receiver.get())) {
+    Diags.report(Loc, diag::err_method_call_requires_variable);
+    return nullptr;
+  }
+  auto *RecTy = Receiver->getType()
+                    ? dyn_cast<RecordTypeDeclaration>(
+                          getUnderlyingType(Receiver->getType()))
+                    : nullptr;
+  if (!RecTy) {
+    Diags.report(Loc, diag::err_method_call_requires_record);
+    return nullptr;
+  }
+  ProcedureDeclaration *Method = lookupMethod(RecTy, Name);
+  if (!Method) {
+    Diags.report(Loc, diag::err_undeclared_method, Name);
+    return nullptr;
+  }
+  // The visible method may be overridden by the dynamic type, so the
+  // receiver type needs a type descriptor.
+  RecTy->setHasTypeTag();
+  checkFormalAndActualParameters(Loc, Method->getFormalParams(), Params);
+  return std::make_unique<MethodCallExpr>(std::move(Receiver), Method,
+                                          std::move(Params));
+}
+
+void Sema::actOnMethodCallStatement(StmtList &Stmts, SMLoc Loc,
+                                    std::unique_ptr<Expr> E) {
+  auto *Call = dyn_cast_or_null<MethodCallExpr>(E.get());
+  if (!Call)
+    return;
+  if (Call->getType())
+    Diags.report(Loc, diag::err_procedure_call_on_nonprocedure);
+  Stmts.push_back(std::make_unique<MethodCallStatement>(std::move(E)));
+}
+
+std::unique_ptr<Expr> Sema::actOnTypeTest(SMLoc Loc, std::unique_ptr<Expr> E,
+                                          Decl *D) {
+  if (!E)
+    return nullptr;
+  auto *TestedTy = dyn_cast_or_null<TypeDeclaration>(D);
+  auto *TestedRec = TestedTy ? dyn_cast<RecordTypeDeclaration>(
+                                   getUnderlyingType(TestedTy))
+                             : nullptr;
+  auto *StaticRec = E->getType() ? dyn_cast<RecordTypeDeclaration>(
+                                       getUnderlyingType(E->getType()))
+                                 : nullptr;
+  if (!TestedRec || !StaticRec || !isDesignator(E.get())) {
+    Diags.report(Loc, diag::err_type_test_requires_record);
+    return nullptr;
+  }
+  if (!isExtensionOf(TestedRec, StaticRec)) {
+    Diags.report(Loc, diag::err_type_test_not_extension);
+    return nullptr;
+  }
+  StaticRec->setHasTypeTag();
+  TestedRec->setHasTypeTag();
+  return std::make_unique<TypeTestExpr>(std::move(E), TestedRec,
+                                        BooleanType.get());
+}
+
 std::unique_ptr<Expr> Sema::actOnFunctionCall(SMLoc Loc, Decl *D,
                                               ExprList Params) {
   if (!D)
     return nullptr;
   if (auto *P = dyn_cast<ProcedureDeclaration>(D)) {
+    if (P->isMethod()) {
+      Diags.report(Loc, diag::err_method_requires_receiver, P->getName());
+      return nullptr;
+    }
     checkFormalAndActualParameters(Loc, P->getFormalParams(), Params);
     if (!P->getRetType())
       Diags.report(Loc, diag::err_function_call_on_nonfunction);

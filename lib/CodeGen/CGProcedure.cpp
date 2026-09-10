@@ -364,6 +364,10 @@ llvm::Value *CGProcedure::emitExpr(Expr *E) {
       }
     }
     return Call;
+  } else if (auto *MethodCall = llvm::dyn_cast<MethodCallExpr>(E)) {
+    return emitMethodCall(MethodCall);
+  } else if (auto *TypeTest = llvm::dyn_cast<TypeTestExpr>(E)) {
+    return emitTypeTest(TypeTest);
   } else if (auto *Idx = llvm::dyn_cast<IndexedExpression>(E)) {
     auto *ArrTy = llvm::cast<ArrayTypeDeclaration>(
         getUnderlyingType(Idx->getBase()->getType()));
@@ -423,15 +427,67 @@ llvm::Value *CGProcedure::emitLValue(FieldAccess *E) {
   llvm::Value *Base = emitExpr(E->getBase());
   auto *RecTy = llvm::cast<RecordTypeDeclaration>(
       getUnderlyingType(E->getBase()->getType()));
-  unsigned Index = 0;
-  for (const auto &F : RecTy->getFields()) {
-    if (F.get() == E->getField())
-      break;
-    ++Index;
-  }
+  unsigned Index = RecTy->getFieldIndex(E->getField());
   llvm::Type *RecLLVMTy = CGM.convertType(RecTy);
   return Builder.CreateGEP(RecLLVMTy, Base,
                            {Builder.getInt32(0), Builder.getInt32(Index)});
+}
+
+llvm::Value *CGProcedure::emitMethodCall(MethodCallExpr *E) {
+  llvm::Value *Self = emitLValue(E->getReceiver());
+  auto *RecTy = llvm::cast<RecordTypeDeclaration>(
+      getUnderlyingType(E->getReceiver()->getType()));
+  ProcedureDeclaration *Method = E->getDecl();
+
+  // Load the implementation from the receiver's type descriptor, so an
+  // overridden method of the dynamic type is called.
+  llvm::GlobalVariable *Desc = CGM.getTypeDescriptor(RecTy);
+  unsigned Slot = getMethodSlot(RecTy, Method->getName());
+  llvm::Type *DescTy = Desc->getValueType();
+  llvm::Value *DynamicDesc = Builder.CreateLoad(
+      llvm::PointerType::get(CGM.getLLVMCtx(), 0), Self);
+  llvm::Value *SlotPtr = Builder.CreateGEP(
+      DescTy, DynamicDesc, {Builder.getInt32(0), Builder.getInt32(Slot)});
+  llvm::Value *Impl = Builder.CreateLoad(
+      llvm::PointerType::get(CGM.getLLVMCtx(), 0), SlotPtr);
+
+  // The receiver is always passed by reference, then the actual parameters.
+  llvm::SmallVector<llvm::Value *, 8> Args{Self};
+  const ExprList &Actuals = E->getParams();
+  const FormalParamList &Formals = Method->getFormalParams();
+  for (size_t I = 0; I < Actuals.size(); ++I) {
+    llvm::Value *V = emitExpr(Actuals[I].get());
+    FormalParameterDeclaration *FP = Formals[I + 1].get();
+    if (!FP->isVar()) {
+      llvm::Type *Ty = mapType(FP);
+      if (Ty->isAggregateType())
+        V = Builder.CreateLoad(Ty, V);
+    }
+    Args.push_back(V);
+  }
+  llvm::Function *Static = CGM.getModule()->getFunction(
+      CGM.mangleName(Method));
+  llvm::Value *Call = Builder.CreateCall(Static->getFunctionType(), Impl,
+                                         Args);
+  if (Method->getRetType()) {
+    llvm::Type *RetTy = CGM.convertType(Method->getRetType());
+    if (RetTy->isAggregateType()) {
+      llvm::Value *Addr = Builder.CreateAlloca(RetTy);
+      Builder.CreateStore(Call, Addr);
+      return Addr;
+    }
+  }
+  return Call;
+}
+
+llvm::Value *CGProcedure::emitTypeTest(TypeTestExpr *E) {
+  llvm::Value *Addr = emitLValue(E->getExpr());
+  llvm::Value *Tag =
+      Builder.CreateLoad(llvm::PointerType::get(CGM.getLLVMCtx(), 0), Addr);
+  auto *TestedTy = llvm::cast<RecordTypeDeclaration>(
+      getUnderlyingType(E->getTestedType()));
+  llvm::GlobalVariable *Desc = CGM.getTypeDescriptor(TestedTy);
+  return Builder.CreateICmpEQ(Tag, Desc);
 }
 
 void CGProcedure::emitMemCpy(llvm::Value *Dst, llvm::Value *Src,
@@ -485,6 +541,11 @@ void CGProcedure::emitStmt(ProcedureCallStatement *Stmt) {
   }
   llvm::Function *Callee = resolveFunction(Proc);
   Builder.CreateCall(Callee->getFunctionType(), Callee, Args);
+}
+
+void CGProcedure::emitStmt(MethodCallStatement *Stmt) {
+  // The result of the method (if any) is discarded.
+  emitMethodCall(llvm::cast<MethodCallExpr>(Stmt->getCall()));
 }
 
 void CGProcedure::emitStmt(IfStatement *Stmt) {
@@ -577,6 +638,8 @@ void CGProcedure::emit(const StmtList &Stmts) {
       emitStmt(Stmt);
     else if (auto *Stmt = llvm::dyn_cast<ProcedureCallStatement>(S.get()))
       emitStmt(Stmt);
+    else if (auto *Stmt = llvm::dyn_cast<MethodCallStatement>(S.get()))
+      emitStmt(Stmt);
     else if (auto *Stmt = llvm::dyn_cast<IfStatement>(S.get()))
       emitStmt(Stmt);
     else if (auto *Stmt = llvm::dyn_cast<WhileStatement>(S.get()))
@@ -624,6 +687,9 @@ void CGProcedure::run(ProcedureDeclaration *Proc) {
       llvm::Type *Ty = mapType(Var);
       if (Ty->isAggregateType()) {
         llvm::Value *Val = Builder.CreateAlloca(Ty);
+        // Initialise the aggregate, including the type descriptor stored in
+        // an extended record.
+        Builder.CreateStore(CGM.getZeroValue(Var->getType()), Val);
         writeLocalVariable(Curr, Var, Val);
       }
     }

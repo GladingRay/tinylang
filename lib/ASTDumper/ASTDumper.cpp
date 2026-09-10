@@ -120,7 +120,7 @@ void ASTDumper::dumpType(TypeDeclaration *T) {
 void ASTDumper::dumpTypeAlias(TypeAliasDeclaration *T) {
   printIndent();
   OS << "TypeAliasDeclaration '" << T->getName() << "' = ";
-  dumpTypeName(T->getAliasedType());
+  dumpTypeDefinition(T->getAliasedType());
   OS << "\n";
 }
 
@@ -128,26 +128,105 @@ void ASTDumper::dumpRecordType(RecordTypeDeclaration *T) {
   printIndent();
   OS << "RecordTypeDeclaration\n";
   ++Indent;
+  if (T->getBaseType()) {
+    printIndent();
+    OS << "Extends: ";
+    dumpTypeName(T->getBaseType());
+    OS << "\n";
+  }
   dumpDeclList("Fields", T->getFields());
+  dumpMethodDecls(T->getMethodDecls());
   --Indent;
 }
 
+void ASTDumper::dumpMethodDecls(const DeclList &Methods) {
+  if (Methods.empty())
+    return;
+  printIndent();
+  OS << "Methods:\n";
+  ++Indent;
+  for (const auto &M : Methods)
+    {
+      printIndent();
+      dumpMethodSignature(cast<ProcedureDeclaration>(M.get()));
+      OS << "\n";
+    }
+  --Indent;
+}
+
+void ASTDumper::dumpMethodSignature(ProcedureDeclaration *P) {
+  OS << "PROCEDURE " << P->getName() << "(";
+  const FormalParamList &Params = P->getFormalParams();
+  size_t Start = (!Params.empty() && Params.front()->isReceiver()) ? 1 : 0;
+  bool First = true;
+  for (size_t I = Start; I < Params.size(); ++I) {
+    if (!First)
+      OS << "; ";
+    First = false;
+    OS << Params[I]->getName() << ": ";
+    dumpTypeName(Params[I]->getType());
+    if (Params[I]->isVar())
+      OS << " (VAR)";
+  }
+  OS << ")";
+  if (P->getRetType()) {
+    OS << ": ";
+    dumpTypeName(P->getRetType());
+  }
+}
+
 void ASTDumper::dumpTypeName(TypeDeclaration *T) {
+  if (!T) {
+    OS << "VOID";
+    return;
+  }
+  // A named type (including an anonymous record or array named by a TYPE
+  // alias) is referred to by its name; only unnamed types are printed
+  // structurally.
+  if (!T->getName().empty()) {
+    OS << T->getName();
+    return;
+  }
+  dumpTypeDefinition(T);
+}
+
+void ASTDumper::dumpTypeDefinition(TypeDeclaration *T) {
+  if (!T) {
+    OS << "VOID";
+    return;
+  }
   if (auto *ArrTy = dyn_cast<ArrayTypeDeclaration>(T)) {
     OS << "ARRAY [" << ArrTy->getLowBound() << ".." << ArrTy->getHighBound()
        << "] OF ";
-    dumpTypeName(ArrTy->getElementType());
+    dumpTypeDefinition(ArrTy->getElementType());
   } else if (auto *RecTy = dyn_cast<RecordTypeDeclaration>(T)) {
-    OS << "RECORD (";
+    OS << "RECORD";
+    if (TypeDeclaration *Base = RecTy->getBaseType()) {
+      OS << " (extends ";
+      dumpTypeName(Base);
+      OS << ")";
+    }
+    OS << " (";
     bool First = true;
     for (const auto &F : RecTy->getFields()) {
       if (!First)
         OS << "; ";
       First = false;
       OS << F->getName() << ": ";
-      dumpTypeName(cast<VariableDeclaration>(F.get())->getType());
+      dumpTypeDefinition(cast<VariableDeclaration>(F.get())->getType());
     }
     OS << ")";
+    if (!RecTy->getMethodDecls().empty()) {
+      OS << " [";
+      bool FirstMethod = true;
+      for (const auto &M : RecTy->getMethodDecls()) {
+        if (!FirstMethod)
+          OS << "; ";
+        FirstMethod = false;
+        dumpMethodSignature(cast<ProcedureDeclaration>(M.get()));
+      }
+      OS << "]";
+    }
   } else if (auto *Alias = dyn_cast<TypeAliasDeclaration>(T)) {
     OS << Alias->getName();
   } else {
@@ -172,13 +251,14 @@ void ASTDumper::dumpFormalParameter(FormalParameterDeclaration *P) {
 }
 
 void ASTDumper::dumpFormalParams(const FormalParamList &Params) {
-  if (Params.empty())
+  size_t Start = (!Params.empty() && Params.front()->isReceiver()) ? 1 : 0;
+  if (Params.size() == Start)
     return;
   printIndent();
   OS << "FormalParameters:\n";
   ++Indent;
-  for (const auto &P : Params)
-    dumpFormalParameter(P.get());
+  for (auto I = Params.begin() + Start; I != Params.end(); ++I)
+    dumpFormalParameter(I->get());
   --Indent;
 }
 
@@ -191,6 +271,12 @@ void ASTDumper::dumpProcedure(ProcedureDeclaration *P) {
   }
   OS << "\n";
   ++Indent;
+  if (FormalParameterDeclaration *Receiver = P->getReceiver()) {
+    printIndent();
+    OS << "Receiver ";
+    dumpTypeName(Receiver->getType());
+    OS << "\n";
+  }
   dumpFormalParams(P->getFormalParams());
   dumpDeclList("Declarations", P->getDecls());
   dumpStmtList("Statements", P->getStmts());
@@ -204,6 +290,9 @@ void ASTDumper::dumpStmt(Stmt *S) {
     break;
   case Stmt::SK_ProcCall:
     dumpProcCall(cast<ProcedureCallStatement>(S));
+    break;
+  case Stmt::SK_MethodCall:
+    dumpMethodCallStatement(cast<MethodCallStatement>(S));
     break;
   case Stmt::SK_If:
     dumpIf(cast<IfStatement>(S));
@@ -239,6 +328,14 @@ void ASTDumper::dumpProcCall(ProcedureCallStatement *S) {
   OS << "ProcedureCallStatement '" << S->getProc()->getName() << "'\n";
   ++Indent;
   dumpExprList("Arguments", S->getParams());
+  --Indent;
+}
+
+void ASTDumper::dumpMethodCallStatement(MethodCallStatement *S) {
+  printIndent();
+  OS << "MethodCallStatement\n";
+  ++Indent;
+  dumpExpr(S->getCall());
   --Indent;
 }
 
@@ -303,6 +400,12 @@ void ASTDumper::dumpExpr(Expr *E) {
     break;
   case Expr::EK_Func:
     dumpFuncCall(cast<FunctionCallExpr>(E));
+    break;
+  case Expr::EK_MethodCall:
+    dumpMethodCall(cast<MethodCallExpr>(E));
+    break;
+  case Expr::EK_TypeTest:
+    dumpTypeTest(cast<TypeTestExpr>(E));
     break;
   case Expr::EK_Indexed:
     dumpIndexedExpression(cast<IndexedExpression>(E));
@@ -381,6 +484,33 @@ void ASTDumper::dumpFuncCall(FunctionCallExpr *E) {
   OS << "\n";
   ++Indent;
   dumpExprList("Arguments", E->getParams());
+  --Indent;
+}
+
+void ASTDumper::dumpMethodCall(MethodCallExpr *E) {
+  printIndent();
+  OS << "MethodCallExpr '" << E->getDecl()->getName() << "' : ";
+  dumpTypeName(E->getType());
+  OS << "\n";
+  ++Indent;
+  printIndent();
+  OS << "Receiver:\n";
+  ++Indent;
+  dumpExpr(E->getReceiver());
+  --Indent;
+  dumpExprList("Arguments", E->getParams());
+  --Indent;
+}
+
+void ASTDumper::dumpTypeTest(TypeTestExpr *E) {
+  printIndent();
+  OS << "TypeTestExpr IS ";
+  dumpTypeName(E->getTestedType());
+  OS << " : ";
+  dumpTypeName(E->getType());
+  OS << "\n";
+  ++Indent;
+  dumpExpr(E->getExpr());
   --Indent;
 }
 

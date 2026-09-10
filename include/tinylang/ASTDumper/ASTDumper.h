@@ -27,7 +27,10 @@ class ASTDumper {
   void dumpType(TypeDeclaration *T);
   void dumpTypeAlias(TypeAliasDeclaration *T);
   void dumpRecordType(RecordTypeDeclaration *T);
+  void dumpMethodDecls(const DeclList &Methods);
+  void dumpMethodSignature(ProcedureDeclaration *P);
   void dumpTypeName(TypeDeclaration *T);
+  void dumpTypeDefinition(TypeDeclaration *T);
   void dumpVariable(VariableDeclaration *V);
   void dumpFormalParameter(FormalParameterDeclaration *P);
   void dumpFormalParams(const FormalParamList &Params);
@@ -35,6 +38,7 @@ class ASTDumper {
 
   void dumpAssignment(AssignmentStatement *S);
   void dumpProcCall(ProcedureCallStatement *S);
+  void dumpMethodCallStatement(MethodCallStatement *S);
   void dumpIf(IfStatement *S);
   void dumpWhile(WhileStatement *S);
   void dumpReturn(ReturnStatement *S);
@@ -47,6 +51,8 @@ class ASTDumper {
   void dumpVariableAccess(VariableAccess *E);
   void dumpConstantAccess(ConstantAccess *E);
   void dumpFuncCall(FunctionCallExpr *E);
+  void dumpMethodCall(MethodCallExpr *E);
+  void dumpTypeTest(TypeTestExpr *E);
   void dumpIndexedExpression(IndexedExpression *E);
   void dumpFieldAccess(FieldAccess *E);
 

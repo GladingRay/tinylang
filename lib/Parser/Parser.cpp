@@ -241,32 +241,92 @@ bool Parser::parseRecordType(Decl *&D) {
   auto _errorhandler = [this] { return skipUntil(tok::kw_END); };
   SMLoc Loc = Tok.getLocation();
   advance(); // RECORD
+  Decl *BaseType = nullptr;
+  if (Tok.is(tok::l_paren)) {
+    // Extended record: RECORD (BaseType) ...
+    advance();
+    if (parseQualident(BaseType))
+      return _errorhandler();
+    if (consume(tok::r_paren))
+      return _errorhandler();
+  }
   DeclList Fields;
-  if (parseFieldList(Fields))
+  DeclList Methods;
+  if (parseRecordBody(Fields, Methods))
     return _errorhandler();
   if (expect(tok::kw_END))
     return _errorhandler();
-  D = Actions.actOnRecordType(Loc, std::move(Fields));
+  D = Actions.actOnRecordType(Loc, BaseType, std::move(Fields),
+                              std::move(Methods));
   advance();
   return false;
 }
 
-bool Parser::parseFieldList(DeclList &Fields) {
+bool Parser::parseRecordBody(DeclList &Fields, DeclList &Methods) {
   auto _errorhandler = [this] { return skipUntil(tok::kw_END); };
-  while (Tok.is(tok::identifier)) {
-    IdentList Ids;
-    Decl *D = nullptr;
-    if (parseIdentList(Ids))
-      return _errorhandler();
-    if (consume(tok::colon))
-      return _errorhandler();
-    if (parseType(D))
-      return _errorhandler();
-    Actions.actOnFieldDeclaration(Fields, Ids, D);
-    if (!Tok.is(tok::semi))
+  while (true) {
+    if (Tok.is(tok::identifier)) {
+      IdentList Ids;
+      Decl *D = nullptr;
+      if (parseIdentList(Ids))
+        return _errorhandler();
+      if (consume(tok::colon))
+        return _errorhandler();
+      if (parseType(D))
+        return _errorhandler();
+      Actions.actOnFieldDeclaration(Fields, Ids, D);
+      if (!Tok.is(tok::semi))
+        break;
+      advance();
+    } else if (Tok.is(tok::kw_PROCEDURE)) {
+      // Method declaration: PROCEDURE Name(params): Ret;
+      if (parseMethodDeclaration(Methods))
+        return _errorhandler();
+    } else {
       break;
-    advance();
+    }
   }
+  return false;
+}
+
+bool Parser::parseMethodDeclaration(DeclList &Methods) {
+  auto _errorhandler = [this] { return skipUntil(tok::kw_END); };
+  SMLoc Loc = Tok.getLocation();
+  advance(); // PROCEDURE
+  if (expect(tok::identifier))
+    return _errorhandler();
+  SMLoc NameLoc = Tok.getLocation();
+  StringRef Name = Tok.getIdentifier();
+  auto D = Actions.actOnMethodDeclaration(NameLoc, Name);
+
+  EnterDeclScope S(Actions, D.get());
+  FormalParamList Params;
+  Decl *RetType = nullptr;
+  SMLoc RetTypeLoc;
+  advance();
+  if (Tok.is(tok::l_paren)) {
+    if (parseFormalParameters(Params, RetType, RetTypeLoc))
+      return _errorhandler();
+  }
+  Actions.actOnMethodDeclaration(D.get(), std::move(Params), RetType,
+                                 RetTypeLoc);
+  if (Tok.is(tok::semi))
+    advance();
+  if (Tok.is(tok::kw_BEGIN)) {
+    // The body needs a receiver to name the object, so it must be written
+    // outside of the record.  Parse it anyway and then skip to the end of the
+    // record body, so that a single diagnostic is produced.
+    getDiagnostics().report(Loc, diag::err_method_body_inside_record);
+    DeclList Decls;
+    StmtList Stmts;
+    if (parseBlock(Decls, Stmts))
+      return _errorhandler();
+    if (expect(tok::identifier))
+      return _errorhandler();
+    advance();
+    return true;
+  }
+  Methods.push_back(std::move(D));
   return false;
 }
 
@@ -274,16 +334,41 @@ bool Parser::parseProcedureDeclaration(DeclList &ParentDecls) {
   auto _errorhandler = [this] { return skipUntil(tok::semi); };
   if (consume(tok::kw_PROCEDURE))
     return _errorhandler();
+
+  // Optional receiver of a type-bound procedure: PROCEDURE (r: T) Name(...).
+  bool IsMethod = false;
+  SMLoc RecvLoc;
+  StringRef RecvName;
+  Decl *RecvType = nullptr;
+  if (Tok.is(tok::l_paren)) {
+    IsMethod = true;
+    advance();
+    if (expect(tok::identifier))
+      return _errorhandler();
+    RecvLoc = Tok.getLocation();
+    RecvName = Tok.getIdentifier();
+    advance();
+    if (consume(tok::colon))
+      return _errorhandler();
+    if (parseQualident(RecvType))
+      return _errorhandler();
+    if (consume(tok::r_paren))
+      return _errorhandler();
+  }
+
   if (expect(tok::identifier))
     return _errorhandler();
-  auto D =
-      Actions.actOnProcedureDeclaration(Tok.getLocation(), Tok.getIdentifier());
+  auto D = Actions.actOnProcedureDeclaration(Tok.getLocation(),
+                                             Tok.getIdentifier(), IsMethod);
 
   EnterDeclScope S(Actions, D.get());
   FormalParamList Params;
   Decl *RetType = nullptr;
   SMLoc RetTypeLoc;
   advance();
+  if (IsMethod)
+    Actions.actOnReceiverParameter(D.get(), RecvLoc, RecvName, RecvType,
+                                   Params);
   if (Tok.is(tok::l_paren)) {
     if (parseFormalParameters(Params, RetType, RetTypeLoc))
       return _errorhandler();
@@ -405,6 +490,8 @@ bool Parser::parseStatement(StmtList &Stmts) {
         if (parseExpression(E))
           return _errorhandler();
         Actions.actOnAssignment(Stmts, Loc, std::move(Target), std::move(E));
+      } else if (Target && llvm::isa<MethodCallExpr>(Target.get())) {
+        Actions.actOnMethodCallStatement(Stmts, Loc, std::move(Target));
       }
     }
   } else if (Tok.is(tok::kw_IF)) {
@@ -525,6 +612,13 @@ bool Parser::parseExpression(std::unique_ptr<Expr> &E) {
     if (parseSimpleExpression(Right))
       return _errorhandler();
     E = Actions.actOnExpression(std::move(E), std::move(Right), Op);
+  } else if (Tok.is(tok::kw_IS)) {
+    SMLoc Loc = Tok.getLocation();
+    advance();
+    Decl *D = nullptr;
+    if (parseQualident(D))
+      return _errorhandler();
+    E = Actions.actOnTypeTest(Loc, std::move(E), D);
   }
   return false;
 }
@@ -762,9 +856,27 @@ bool Parser::parseDesignator(std::unique_ptr<Expr> &E) {
       advance(); // period
       if (expect(tok::identifier))
         return true;
-      E = Actions.actOnFieldAccess(Tok.getLocation(), std::move(E),
-                                   Tok.getIdentifier());
+      SMLoc Loc = Tok.getLocation();
+      StringRef Name = Tok.getIdentifier();
       advance();
+      if (Tok.is(tok::l_paren)) {
+        // Type-bound procedure call: receiver.Name(arguments).
+        advance();
+        ExprList Exprs;
+        if (Tok.isOneOf(tok::l_paren, tok::plus, tok::minus, tok::kw_NOT,
+                        tok::identifier, tok::integer_literal,
+                        tok::real_literal)) {
+          if (parseExpList(Exprs))
+            return true;
+        }
+        if (expect(tok::r_paren))
+          return true;
+        E = Actions.actOnMethodCall(Loc, std::move(E), Name,
+                                    std::move(Exprs));
+        advance();
+      } else {
+        E = Actions.actOnFieldAccess(Loc, std::move(E), Name);
+      }
     }
   }
   return false;

@@ -9,6 +9,8 @@ class CGModule {
   llvm::Module *M;
   ModuleDeclaration *Mod;
   llvm::DenseMap<Decl *, llvm::GlobalObject *> Globals;
+  llvm::DenseMap<TypeDeclaration *, llvm::GlobalVariable *> TypeDescriptors;
+  llvm::DenseMap<TypeDeclaration *, unsigned> TypeIds;
 
 public:
   llvm::Type *VoidTy;
@@ -39,6 +41,18 @@ public:
   std::string mangleName(Decl *D);
 
   llvm::GlobalObject *getGlobal(Decl *D);
+
+  /// The type descriptor (virtual method table) of an extended record type,
+  /// created on demand.
+  llvm::GlobalVariable *getTypeDescriptor(RecordTypeDeclaration *Ty);
+
+  /// A unique number identifying an extended record type, used to keep the
+  /// symbol names of type-bound procedures apart.
+  unsigned getTypeId(TypeDeclaration *Ty);
+
+  /// A zero value of \p Ty that also initialises the type descriptors of
+  /// extended records.
+  llvm::Constant *getZeroValue(TypeDeclaration *Ty);
 
   /// Writes the current LLVM IR to "tinylang-dump-<N>.ll", where N is a
   /// monotonically increasing counter.  Intended for tracing how the IR

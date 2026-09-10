@@ -16,6 +16,15 @@ class Sema {
 
   bool isSameType(TypeDeclaration *LHS, TypeDeclaration *RHS);
 
+  /// True if a value of type \p Actual may be passed to a VAR parameter of
+  /// type \p Formal, i.e. the types are the same or \p Actual extends it.
+  bool isCompatibleWithFormal(TypeDeclaration *Actual, TypeDeclaration *Formal,
+                              bool IsVar);
+
+  /// True if both procedures have the same parameter (ignoring the receiver)
+  /// and result types.
+  bool hasSameSignature(ProcedureDeclaration *LHS, ProcedureDeclaration *RHS);
+
   void checkFormalAndActualParameters(SMLoc Loc, const FormalParamList &Formals,
                                       const ExprList &Actuals);
 
@@ -30,6 +39,9 @@ class Sema {
   std::unique_ptr<ConstantDeclaration> FalseConst;
   /// Anonymous array types created while parsing type declarations.
   std::vector<std::unique_ptr<TypeDeclaration>> OwnedTypes;
+  /// Methods declared inside a record body, checked for an implementation at
+  /// the end of the module.
+  std::vector<ProcedureDeclaration *> DeclaredMethods;
 
 public:
   Sema(DiagnosticsEngine &Diags)
@@ -52,13 +64,21 @@ public:
   TypeDeclaration *actOnArrayType(SMLoc Loc, std::unique_ptr<Expr> Low,
                                   std::unique_ptr<Expr> High,
                                   TypeDeclaration *ElementType);
-  TypeDeclaration *actOnRecordType(SMLoc Loc, DeclList Fields);
+  TypeDeclaration *actOnRecordType(SMLoc Loc, Decl *BaseType, DeclList Fields,
+                                   DeclList Methods);
+  std::unique_ptr<ProcedureDeclaration>
+  actOnMethodDeclaration(SMLoc Loc, StringRef Name);
+  void actOnMethodDeclaration(ProcedureDeclaration *ProcDecl,
+                              FormalParamList Params, Decl *RetType,
+                              SMLoc RetTypeLoc);
   void actOnVariableDeclaration(DeclList &Decls, IdentList &Ids, Decl *D);
   void actOnFieldDeclaration(DeclList &Fields, IdentList &Ids, Decl *D);
   void actOnFormalParameterDeclaration(FormalParamList &Params, IdentList &Ids,
                                        Decl *D, bool IsVar);
-  std::unique_ptr<ProcedureDeclaration> actOnProcedureDeclaration(SMLoc Loc,
-                                                                  StringRef Name);
+  std::unique_ptr<ProcedureDeclaration>
+  actOnProcedureDeclaration(SMLoc Loc, StringRef Name, bool IsMethod);
+  void actOnReceiverParameter(ProcedureDeclaration *ProcDecl, SMLoc Loc,
+                              StringRef Name, Decl *D, FormalParamList &Params);
   void actOnProcedureHeading(ProcedureDeclaration *ProcDecl,
                              FormalParamList Params, Decl *RetType,
                              SMLoc RetTypeLoc);
@@ -97,6 +117,13 @@ public:
                                          StringRef Name);
   std::unique_ptr<Expr> actOnFunctionCall(SMLoc Loc, Decl *D,
                                           ExprList Params);
+  std::unique_ptr<Expr> actOnMethodCall(SMLoc Loc,
+                                        std::unique_ptr<Expr> Receiver,
+                                        StringRef Name, ExprList Params);
+  void actOnMethodCallStatement(StmtList &Stmts, SMLoc Loc,
+                                std::unique_ptr<Expr> E);
+  std::unique_ptr<Expr> actOnTypeTest(SMLoc Loc, std::unique_ptr<Expr> E,
+                                      Decl *D);
   Decl *actOnQualIdentPart(Decl *Prev, SMLoc Loc, StringRef Name);
 };
 
