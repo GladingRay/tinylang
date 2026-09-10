@@ -8,6 +8,19 @@
 
 using namespace tinylang;
 
+namespace {
+/// The declaration a designator refers to, if it denotes one.
+Decl *designatorDecl(Expr *E) {
+  if (auto *Var = llvm::dyn_cast<VariableAccess>(E))
+    return Var->getDecl();
+  if (auto *Field = llvm::dyn_cast<FieldAccess>(E))
+    return designatorDecl(Field->getBase());
+  if (auto *Idx = llvm::dyn_cast<IndexedExpression>(E))
+    return designatorDecl(Idx->getBase());
+  return nullptr;
+}
+} // namespace
+
 void CGProcedure::writeLocalVariable(llvm::BasicBlock *BB, Decl *D,
                                      llvm::Value *Val) {
   assert(BB && "Basic block is nullptr");
@@ -117,8 +130,13 @@ void CGProcedure::sealBlock(llvm::BasicBlock *BB) {
 void CGProcedure::writeVariable(llvm::BasicBlock *BB, Decl *D,
                                 llvm::Value *Val) {
   if (auto *V = llvm::dyn_cast<VariableDeclaration>(D)) {
-    if (V->getEnclosingDecl() == Proc)
+    if (V->getEnclosingDecl() == Proc) {
+      if (llvm::Value *Addr = PromotedLocals.lookup(D)) {
+        Builder.CreateStore(Val, Addr);
+        return;
+      }
       writeLocalVariable(BB, D, Val);
+    }
     else if (V->getEnclosingDecl() == CGM.getModuleDeclaration()) {
       Builder.CreateStore(Val, CGM.getGlobal(D));
     } else
@@ -126,7 +144,9 @@ void CGProcedure::writeVariable(llvm::BasicBlock *BB, Decl *D,
   } else if (auto *FP = llvm::dyn_cast<FormalParameterDeclaration>(D)) {
     if (FP->isVar()) {
       Builder.CreateStore(Val, FormalParams[FP]);
-    } else
+    } else if (llvm::Value *Addr = PromotedLocals.lookup(D))
+      Builder.CreateStore(Val, Addr);
+    else
       writeLocalVariable(BB, D, Val);
   } else
     llvm::report_fatal_error("Unsupported declaration");
@@ -134,8 +154,11 @@ void CGProcedure::writeVariable(llvm::BasicBlock *BB, Decl *D,
 
 llvm::Value *CGProcedure::readVariable(llvm::BasicBlock *BB, Decl *D) {
   if (auto *V = llvm::dyn_cast<VariableDeclaration>(D)) {
-    if (V->getEnclosingDecl() == Proc)
+    if (V->getEnclosingDecl() == Proc) {
+      if (llvm::Value *Addr = PromotedLocals.lookup(D))
+        return Builder.CreateLoad(mapType(D), Addr);
       return readLocalVariable(BB, D);
+    }
     else if (V->getEnclosingDecl() == CGM.getModuleDeclaration()) {
       llvm::Type *Ty = mapType(D);
       if (Ty->isAggregateType())
@@ -149,10 +172,91 @@ llvm::Value *CGProcedure::readVariable(llvm::BasicBlock *BB, Decl *D) {
       if (Ty->isAggregateType())
         return FormalParams[FP]; // arrays: the address of the argument
       return Builder.CreateLoad(Ty, FormalParams[FP]);
-    } else
+    }
+    if (llvm::Value *Addr = PromotedLocals.lookup(D))
+      return Builder.CreateLoad(mapType(FP), Addr);
+    else
       return readLocalVariable(BB, D);
   } else
     llvm::report_fatal_error("Unsupported declaration");
+}
+
+void CGProcedure::noteVarArguments(const FormalParamList &Formals,
+                                   const ExprList &Actuals) {
+  size_t Start =
+      (!Formals.empty() && Formals.front()->isReceiver()) ? 1 : 0;
+  for (size_t I = 0; I < Actuals.size() && I + Start < Formals.size(); ++I) {
+    if (!Formals[I + Start]->isVar())
+      continue;
+    Decl *D = designatorDecl(Actuals[I].get());
+    if (!D)
+      continue;
+    // Only scalars need to move to memory: aggregates already live there and
+    // VAR parameters already hold an address.
+    if (auto *V = llvm::dyn_cast<VariableDeclaration>(D)) {
+      if (V->getEnclosingDecl() == Proc && !mapType(V)->isAggregateType())
+        ByRefLocals.insert(V);
+    } else if (auto *P = llvm::dyn_cast<FormalParameterDeclaration>(D)) {
+      if (!P->isVar() && !mapType(P)->isAggregateType())
+        ByRefLocals.insert(P);
+    }
+  }
+}
+
+void CGProcedure::collectByRefLocals(Expr *E) {
+  if (!E)
+    return;
+  if (auto *Infix = llvm::dyn_cast<InfixExpression>(E)) {
+    collectByRefLocals(Infix->getLeft());
+    collectByRefLocals(Infix->getRight());
+  } else if (auto *Prefix = llvm::dyn_cast<PrefixExpression>(E)) {
+    collectByRefLocals(Prefix->getExpr());
+  } else if (auto *Idx = llvm::dyn_cast<IndexedExpression>(E)) {
+    collectByRefLocals(Idx->getBase());
+    collectByRefLocals(Idx->getIndex());
+  } else if (auto *Field = llvm::dyn_cast<FieldAccess>(E)) {
+    collectByRefLocals(Field->getBase());
+  } else if (auto *Call = llvm::dyn_cast<FunctionCallExpr>(E)) {
+    for (const auto &Arg : Call->getParams())
+      collectByRefLocals(Arg.get());
+    noteVarArguments(Call->getDecl()->getFormalParams(), Call->getParams());
+  } else if (auto *Call = llvm::dyn_cast<MethodCallExpr>(E)) {
+    collectByRefLocals(Call->getReceiver());
+    for (const auto &Arg : Call->getParams())
+      collectByRefLocals(Arg.get());
+    noteVarArguments(Call->getDecl()->getFormalParams(), Call->getParams());
+  } else if (auto *Test = llvm::dyn_cast<TypeTestExpr>(E)) {
+    collectByRefLocals(Test->getExpr());
+  }
+}
+
+void CGProcedure::collectByRefLocals(Stmt *S) {
+  if (!S)
+    return;
+  if (auto *Assign = llvm::dyn_cast<AssignmentStatement>(S)) {
+    collectByRefLocals(Assign->getTarget());
+    collectByRefLocals(Assign->getExpr());
+  } else if (auto *Call = llvm::dyn_cast<ProcedureCallStatement>(S)) {
+    for (const auto &Arg : Call->getParams())
+      collectByRefLocals(Arg.get());
+    noteVarArguments(Call->getProc()->getFormalParams(), Call->getParams());
+  } else if (auto *Call = llvm::dyn_cast<MethodCallStatement>(S)) {
+    collectByRefLocals(Call->getCall());
+  } else if (auto *If = llvm::dyn_cast<IfStatement>(S)) {
+    collectByRefLocals(If->getCond());
+    collectByRefLocals(If->getIfStmts());
+    collectByRefLocals(If->getElseStmts());
+  } else if (auto *While = llvm::dyn_cast<WhileStatement>(S)) {
+    collectByRefLocals(While->getCond());
+    collectByRefLocals(While->getWhileStmts());
+  } else if (auto *Ret = llvm::dyn_cast<ReturnStatement>(S)) {
+    collectByRefLocals(Ret->getRetVal());
+  }
+}
+
+void CGProcedure::collectByRefLocals(const StmtList &Stmts) {
+  for (const auto &S : Stmts)
+    collectByRefLocals(S.get());
 }
 
 llvm::Type *CGProcedure::mapType(Decl *Decl, bool HonorReference) {
@@ -341,9 +445,13 @@ llvm::Value *CGProcedure::emitExpr(Expr *E) {
     llvm::SmallVector<llvm::Value *, 8> Args;
     const ExprList &Actuals = FuncCall->getParams();
     for (size_t I = 0; I < Actuals.size(); ++I) {
-      llvm::Value *V = emitExpr(Actuals[I].get());
       FormalParameterDeclaration *FP = Proc->getFormalParams()[I].get();
-      if (!FP->isVar()) {
+      llvm::Value *V;
+      if (FP->isVar()) {
+        // A VAR parameter is passed as the address of the argument.
+        V = emitLValue(Actuals[I].get());
+      } else {
+        V = emitExpr(Actuals[I].get());
         llvm::Type *Ty = mapType(FP);
         if (Ty->isAggregateType())
           V = Builder.CreateLoad(Ty, V);
@@ -390,8 +498,14 @@ llvm::Value *CGProcedure::emitLValue(Expr *E) {
   if (auto *Var = llvm::dyn_cast<VariableAccess>(E)) {
     Decl *D = Var->getDecl();
     if (auto *V = llvm::dyn_cast<VariableDeclaration>(D)) {
-      if (V->getEnclosingDecl() == Proc)
+      if (V->getEnclosingDecl() == Proc) {
+        if (llvm::Value *Addr = PromotedLocals.lookup(D))
+          return Addr;
+        if (!mapType(D)->isAggregateType())
+          llvm::report_fatal_error(
+              "Address of a scalar local requested outside a VAR argument");
         return readLocalVariable(Curr, D);
+      }
       if (V->getEnclosingDecl() == CGM.getModuleDeclaration())
         return CGM.getGlobal(D);
       llvm::report_fatal_error("Nested procedures not yet supported");
@@ -399,10 +513,13 @@ llvm::Value *CGProcedure::emitLValue(Expr *E) {
     if (auto *FP = llvm::dyn_cast<FormalParameterDeclaration>(D)) {
       if (FP->isVar())
         return FormalParams[FP];
-      llvm::Type *Ty = mapType(FP);
-      if (Ty->isAggregateType())
-        return readLocalVariable(Curr, D);
-      llvm::report_fatal_error("Cannot take address of scalar value parameter");
+      if (llvm::Value *Addr = PromotedLocals.lookup(D))
+        return Addr;
+      if (!mapType(FP)->isAggregateType())
+        llvm::report_fatal_error(
+            "Address of a scalar value parameter requested outside a VAR "
+            "argument");
+      return readLocalVariable(Curr, D);
     }
   } else if (auto *Idx = llvm::dyn_cast<IndexedExpression>(E)) {
     return emitLValue(Idx);
@@ -456,9 +573,12 @@ llvm::Value *CGProcedure::emitMethodCall(MethodCallExpr *E) {
   const ExprList &Actuals = E->getParams();
   const FormalParamList &Formals = Method->getFormalParams();
   for (size_t I = 0; I < Actuals.size(); ++I) {
-    llvm::Value *V = emitExpr(Actuals[I].get());
     FormalParameterDeclaration *FP = Formals[I + 1].get();
-    if (!FP->isVar()) {
+    llvm::Value *V;
+    if (FP->isVar()) {
+      V = emitLValue(Actuals[I].get());
+    } else {
+      V = emitExpr(Actuals[I].get());
       llvm::Type *Ty = mapType(FP);
       if (Ty->isAggregateType())
         V = Builder.CreateLoad(Ty, V);
@@ -530,9 +650,13 @@ void CGProcedure::emitStmt(ProcedureCallStatement *Stmt) {
   llvm::SmallVector<llvm::Value *, 8> Args;
   const ExprList &Actuals = Stmt->getParams();
   for (size_t I = 0; I < Actuals.size(); ++I) {
-    llvm::Value *V = emitExpr(Actuals[I].get());
     FormalParameterDeclaration *FP = Proc->getFormalParams()[I].get();
-    if (!FP->isVar()) {
+    llvm::Value *V;
+    if (FP->isVar()) {
+      // A VAR parameter is passed as the address of the argument.
+      V = emitLValue(Actuals[I].get());
+    } else {
+      V = emitExpr(Actuals[I].get());
       llvm::Type *Ty = mapType(FP);
       if (Ty->isAggregateType())
         V = Builder.CreateLoad(Ty, V);
@@ -660,6 +784,11 @@ void CGProcedure::run(ProcedureDeclaration *Proc) {
       CGM.getLLVMCtx(), "entry", Fn);
   setCurr(BB);
 
+  // Find the declarations that must live in memory because their address is
+  // passed to a VAR parameter.  This has to happen before the body is
+  // emitted, otherwise a scalar would already have an SSA value.
+  collectByRefLocals(Proc->getStmts());
+
   for (auto Pair : llvm::enumerate(Fn->args())) {
     llvm::Argument *Arg = &Pair.value();
     FormalParameterDeclaration *FP =
@@ -676,6 +805,12 @@ void CGProcedure::run(ProcedureDeclaration *Proc) {
       llvm::Value *Addr = Builder.CreateAlloca(Ty);
       Builder.CreateStore(Arg, Addr);
       writeLocalVariable(Curr, FP, Addr);
+    } else if (ByRefLocals.count(FP)) {
+      // The value parameter is passed on to a VAR parameter, so it needs an
+      // address of its own.
+      llvm::Value *Addr = Builder.CreateAlloca(Ty, nullptr, FP->getName());
+      Builder.CreateStore(Arg, Addr);
+      PromotedLocals[FP] = Addr;
     } else {
       writeLocalVariable(Curr, FP, Arg);
     }
@@ -691,6 +826,11 @@ void CGProcedure::run(ProcedureDeclaration *Proc) {
         // an extended record.
         Builder.CreateStore(CGM.getZeroValue(Var->getType()), Val);
         writeLocalVariable(Curr, Var, Val);
+      } else if (ByRefLocals.count(Var)) {
+        // A scalar whose address is needed lives in a stack slot.
+        llvm::Value *Val = Builder.CreateAlloca(Ty, nullptr, Var->getName());
+        Builder.CreateStore(CGM.getZeroValue(Var->getType()), Val);
+        PromotedLocals[Var] = Val;
       }
     }
   }

@@ -2,6 +2,7 @@
 
 #include "tinylang/AST/AST.h"
 #include "tinylang/CodeGen/CGModule.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Value.h"
@@ -33,6 +34,19 @@ class CGProcedure {
   };
 
   llvm::DenseMap<llvm::BasicBlock *, BasicBlockDef> CurrentDef;
+
+  /// Locals and value parameters whose address is needed because they are
+  /// passed to a VAR parameter.  They are kept in memory instead of using the
+  /// SSA representation.
+  llvm::DenseMap<Decl *, llvm::Value *> PromotedLocals;
+
+  /// Declarations identified as VAR arguments before the body is emitted.
+  llvm::SmallPtrSet<Decl *, 8> ByRefLocals;
+
+  void collectByRefLocals(const StmtList &Stmts);
+  void collectByRefLocals(Stmt *S);
+  void collectByRefLocals(Expr *E);
+  void noteVarArguments(const FormalParamList &Formals, const ExprList &Actuals);
 
   void writeLocalVariable(llvm::BasicBlock *BB, Decl *D, llvm::Value *Val);
 

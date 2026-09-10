@@ -53,7 +53,7 @@ END GCD;
 END Gcd.
 ```
 
-More examples live in `example/`: `Gcd.mod`, `Fib.mod`, `Arrays.mod`, `TypeAlias.mod`, `Record.mod`, `Real.mod`, `Shapes.mod`, `ReturnRecord.mod`, and `ReturnArray.mod`, each with a matching `call*.c` harness.
+More examples live in `example/`: `Gcd.mod`, `Fib.mod`, `Arrays.mod`, `TypeAlias.mod`, `Record.mod`, `Real.mod`, `Shapes.mod`, `ReturnRecord.mod`, `ReturnArray.mod`, and `VarParam.mod`, each with a matching `call*.c` harness.
 
 ## Current Status
 
@@ -161,7 +161,7 @@ The same pattern is used by the `call*.c` harnesses for `Gcd`, `Fib`, `Arrays`, 
 - **Lexer**: keywords are matched with an `llvm::StringMap`; numbers support decimal and `H`-suffixed hexadecimal integers plus real literals (`digits.digits[E[+|-]digits]`; the `D` scale factor of `LONGREAL` is diagnosed as unimplemented); comments nest.
 - **AST**: LLVM-style polymorphic class hierarchy with `isa`/`cast`-style downcasting via `classof()`.
 - **Semantic analysis**: `Scope` implements the symbol table; `EnterDeclScope` uses RAII; `Sema` is decoupled from the parser through `actOn*` callbacks.
-- **Code generation**: `CGModule`/`CGProcedure` use `llvm::IRBuilder`. Scalar locals use SSA with phi construction; aggregates (arrays/records) are kept in memory and accessed with GEP; record/array assignment lowers to `memcpy`; aggregate return values are spilled through a temporary alloca; symbols are mangled with `_t<len><name>`.
+- **Code generation**: `CGModule`/`CGProcedure` use `llvm::IRBuilder`. Scalar locals use SSA with phi construction; aggregates (arrays/records) are kept in memory and accessed with GEP; record/array assignment lowers to `memcpy`; aggregate return values are spilled through a temporary alloca; symbols are mangled with `_t<len><name>`. A VAR parameter is passed as a `ptr` to the argument, so a scalar local or value parameter that is used as a VAR argument is moved into a stack slot on demand (the value computed so far is stored there, and later accesses load from it).
 - **Object model**: an extended record stores the base fields directly after a hidden type descriptor pointer, so a derived record is prefix-compatible with its base. Methods are declared in the record body and their prototypes receive an implicit receiver; the outside definition with a receiver of the same type supplies the body and replaces the prototype in the method table. `CGModule` emits one descriptor per type listing its method implementations (inherited ones included); a method call loads the implementation from the receiver's descriptor, which is what makes the dispatch dynamic.
 - **Debug IR dump**: configure with `-DTINYLANG_ENABLE_IR_DUMP=ON` to write `tinylang-dump-<N>.ll` snapshots around phi-node creation/updates.
 - **Robust error handling**: parser error recovery is guarded in Sema; invalid decimal literals reported by the lexer are treated as `0` instead of aborting.

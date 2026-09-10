@@ -53,7 +53,7 @@ END GCD;
 END Gcd.
 ```
 
-更多示例见 `example/`：`Gcd.mod`、`Fib.mod`、`Arrays.mod`、`TypeAlias.mod`、`Record.mod`、`Real.mod`、`Shapes.mod`、`ReturnRecord.mod`、`ReturnArray.mod`，每个都配有对应的 `call*.c` 验证程序。
+更多示例见 `example/`：`Gcd.mod`、`Fib.mod`、`Arrays.mod`、`TypeAlias.mod`、`Record.mod`、`Real.mod`、`Shapes.mod`、`ReturnRecord.mod`、`ReturnArray.mod`、`VarParam.mod`，每个都配有对应的 `call*.c` 验证程序。
 
 ## 当前进度
 
@@ -161,7 +161,7 @@ cc /tmp/Record.o /tmp/callrecord.o -o /tmp/callrecord
 - **词法分析**：关键字通过 `llvm::StringMap` 匹配；数字支持十进制与 `H` 后缀十六进制整数，以及实数（`digits.digits[E[+|-]digits]`；`LONGREAL` 的 `D` 指数会报“未实现”诊断）；注释支持嵌套。
 - **AST**：采用 LLVM 风格的多态类层次，通过 `classof()` 支持 `isa`/`cast` 风格的向下转型。
 - **语义分析**：`Scope` 用 `llvm::StringMap` 实现符号表，`EnterDeclScope` 以 RAII 方式管理作用域，`Sema` 通过 `actOn*` 回调与 Parser 解耦。
-- **代码生成**：`CGModule`/`CGProcedure` 使用 `llvm::IRBuilder`。标量局部变量走 SSA 并构造 phi 节点；数组/记录等聚合类型保存在内存中并用 GEP 访问；record/数组整体赋值生成 `memcpy`；聚合类型返回值通过临时 alloca 保存；符号按 `_t<长度><名字>` 规则混淆。
+- **代码生成**：`CGModule`/`CGProcedure` 使用 `llvm::IRBuilder`。标量局部变量走 SSA 并构造 phi 节点；数组/记录等聚合类型保存在内存中并用 GEP 访问；record/数组整体赋值生成 `memcpy`；聚合类型返回值通过临时 alloca 保存；符号按 `_t<长度><名字>` 规则混淆。VAR 形参以 `ptr` 传递实参地址，因此当标量局部变量或值形参被用作 VAR 实参时，会按需把它们从 SSA 值“下沉”到栈槽：先把当前值存入栈槽，之后的读写都走内存。
 - **对象模型**：扩展记录在隐藏的类型描述符指针之后顺序存放基记录字段，因此派生记录与基记录前缀兼容。方法声明写在 record 体内，其原型会获得一个隐式接收者；外部同名同类型接收者的实现提供函数体，并在方法表中替换掉原型。`CGModule` 为每个类型生成一张描述符表，记录该类型实际使用的方法实现（含继承而来的方法）；方法调用从接收者对象的描述符里取实现，这正是动态分派的来源。
 - **调试 IR dump**：配置时加 `-DTINYLANG_ENABLE_IR_DUMP=ON`，会在 phi 节点创建/更新前后写出 `tinylang-dump-<N>.ll` 快照。
 - **健壮的错误处理**：Sema 能容忍语法错误恢复；词法层报告过的非法十进制字面量按 0 处理而不是中止编译。
