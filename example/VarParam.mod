@@ -106,4 +106,19 @@ BEGIN
   RETURN s
 END LoopIncrement;
 
+(* The same local passed both to a value parameter and to a VAR parameter.
+   The VAR call forces k into memory, so every value call has to load the
+   current value from that stack slot. *)
+PROCEDURE MixedCalls(): INTEGER;
+VAR k, a, b, c: INTEGER;
+BEGIN
+  k := 10;
+  a := BumpVal(k);
+  Inc(k);
+  b := BumpVal(k);
+  Inc(k);
+  c := BumpVal(k);
+  RETURN a * 10000 + b * 100 + c
+END MixedCalls;
+
 END VarParam.

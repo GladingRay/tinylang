@@ -8,6 +8,7 @@ extern long _t8VarParam10IncElement(void);
 extern long _t8VarParam15MoveGlobalPoint(void);
 extern long _t8VarParam15FillGlobalArray(void);
 extern long _t8VarParam13LoopIncrement(void);
+extern long _t8VarParam10MixedCalls(void);
 
 int main(void) {
   struct {
@@ -23,6 +24,9 @@ int main(void) {
       {"MovePoint(p, 10, 20) -> 1122", _t8VarParam15MoveGlobalPoint(), 1122},
       {"Fill(v, 5) -> 567", _t8VarParam15FillGlobalArray(), 567},
       {"Inc(s) in a WHILE loop -> 3", _t8VarParam13LoopIncrement(), 3},
+      /* Value call, VAR call, value call, VAR call, value call: each value
+         call must observe the current value of k (11, 12, 13). */
+      {"mixed value/VAR calls -> 111213", _t8VarParam10MixedCalls(), 111213},
       /* Value parameters only copy: the caller keeps k. */
       {"BumpVal(7) * 100 + 7 -> 807", _t8VarParam16ValueKeepsCaller(), 807},
   };

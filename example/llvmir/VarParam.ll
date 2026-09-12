@@ -148,3 +148,23 @@ after.while.0:                                    ; preds = %while.cond.0
   %3 = load i64, ptr %s, align 8
   ret i64 %3
 }
+
+define i64 @_t8VarParam10MixedCalls() {
+entry:
+  %k = alloca i64, align 8
+  store i64 0, ptr %k, align 8
+  store i64 10, ptr %k, align 8
+  %0 = load i64, ptr %k, align 8
+  %1 = call i64 @_t8VarParam7BumpVal(i64 %0)
+  call void @_t8VarParam3Inc(ptr %k)
+  %2 = load i64, ptr %k, align 8
+  %3 = call i64 @_t8VarParam7BumpVal(i64 %2)
+  call void @_t8VarParam3Inc(ptr %k)
+  %4 = load i64, ptr %k, align 8
+  %5 = call i64 @_t8VarParam7BumpVal(i64 %4)
+  %6 = mul nsw i64 %1, 10000
+  %7 = mul nsw i64 %3, 100
+  %8 = add nsw i64 %6, %7
+  %9 = add nsw i64 %8, %5
+  ret i64 %9
+}
