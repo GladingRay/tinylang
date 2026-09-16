@@ -53,7 +53,7 @@ END GCD;
 END Gcd.
 ```
 
-更多示例见 `example/`：`Gcd.mod`、`Fib.mod`、`Arrays.mod`、`TypeAlias.mod`、`Record.mod`、`Real.mod`、`Shapes.mod`、`ReturnRecord.mod`、`ReturnArray.mod`、`VarParam.mod`，每个都配有对应的 `call*.c` 验证程序。
+更多示例见 `example/`：`Gcd.mod`、`Fib.mod`、`Arrays.mod`、`TypeAlias.mod`、`Record.mod`、`Real.mod`、`Shapes.mod`、`ReturnRecord.mod`、`ReturnArray.mod`、`VarParam.mod`、`Expr.mod`，每个都配有对应的 `call*.c` 验证程序。
 
 ## 当前进度
 

@@ -55,7 +55,6 @@ DIAG(err_type_test_not_extension, Error, "type test requires a type extension of
 DIAG(err_wrong_number_of_parameters, Error, "wrong number of parameters")
 DIAG(err_type_of_formal_and_actual_parameter_not_compatible, Error, "type of formal and actual parameter are not compatible")
 DIAG(err_var_parameter_requires_var, Error, "VAR parameter requires variable as argument")
-DIAG(warn_ambigous_negation, Warning, "Negation is ambigous. Please consider using parenthesis.")
 DIAG(err_function_requires_return, Error, "Function requires RETURN with value")
 DIAG(err_procedure_requires_empty_return, Error, "Procedure does not allow RETURN with value")
 DIAG(err_function_and_return_type, Error, "Type of RETURN value is not compatible with function type")

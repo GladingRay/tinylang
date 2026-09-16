@@ -70,8 +70,8 @@ tinylang 是一个用 C++17 实现的 **Modula-2 子集编译器**，后端直�
 ```text
 include + lib + tools ≈ 5.6k 行 C++
 test/    42 个诊断回归用例（.mod）
-example/ 10 个端到端示例（.mod + call*.c）
-example/llvmir/ 10 份与示例对应的 IR 快照
+example/ 11 个端到端示例（.mod + call*.c）
+example/llvmir/ 11 份与示例对应的 IR 快照
 ```
 
 ---
@@ -188,11 +188,11 @@ KEYWORD(IF, KEYALL)      // 关键字，实际枚举名是 kw_IF
 
 ```c
 DIAG(err_undeclared_name, Error, "undeclared name {0}")
-DIAG(warn_ambigous_negation, Warning, "Negation is ambigous. ...")
 DIAG(note_module_identifier_declaration, Note, "module identifier declared here")
 ```
 
 三列分别是：枚举名、严重级别（`Error`/`Warning`/`Note`）、消息模板（支持 `llvm::formatv` 的占位符）。
+级别只是一个宏参数，需要时写 `Warning` 即可（映射到 `llvm::SourceMgr::DK_Warning`，不计入错误数）；当前清单里只用到 `Error` 与 `Note`。
 
 `lib/Basic/Diagnostic.cpp` 用两次展开生成消息表与级别表：
 
@@ -808,7 +808,7 @@ bool Sema::isCompatibleWithFormal(TypeDeclaration *Actual,
 | `actOnPrefixExpression` | `NOT` 布尔字面量 |
 | `evalConstInt`（静态函数） | 整数字面量与一元负号，用于数组上下界求值 |
 
-`actOnPrefixExpression` 里还有一个「歧义负号」警告：当 `-` 后面不是字面量/变量/常量，或者不是乘除表达式时会报 `warn_ambigous_negation`，提示读者加括号。
+一元负号的处理遵循 Modula-2 报告：`simple_expression = ["+"|"-"] term { add_op term }`，即**符号只作用于第一个 term**。因此 `-a + b` 等价于 `(-a) + b`，而 `-a * b` 等价于 `-(a * b)`（乘除属于 term 内部）。想改变符号的作用范围就加括号：`(-a) + b`、`-(a + b)`。`Parser::parseSimpleExpression` 先读入符号、解析完第一个 term 后立刻套用，再进入加减循环，正是这个规则的直接实现；这三种写法都有 `example/Expr.mod` 的回归用例覆盖。
 
 ### 7.5 语句检查
 
@@ -1543,6 +1543,7 @@ cc /tmp/Record.o /tmp/callrecord.o -o /tmp/callrecord
 | `ReturnRecord.mod` / `ReturnArray.mod` | 聚合类型作为返回值 |
 | `Shapes.mod` | 继承、方法覆盖、动态分派、`IS` |
 | `VarParam.mod` | 值/引用参数、标量降级到内存、循环内传引用 |
+| `Expr.mod` | 运算符优先级、括号、一元负号的作用范围、关系与逻辑运算 |
 
 ---
 

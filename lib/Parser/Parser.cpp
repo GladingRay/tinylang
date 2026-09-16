@@ -672,6 +672,10 @@ bool Parser::parseSimpleExpression(std::unique_ptr<Expr> &E) {
   }
   if (parseTerm(E))
     return _errorhandler();
+  // The unary sign belongs to the first term only, so "-a + b" means
+  // "(-a) + b" while "-a * b" means "-(a * b)" (Modula-2 report).
+  if (!PrefixOp.isUnspecified())
+    E = Actions.actOnPrefixExpression(std::move(E), PrefixOp);
   while (Tok.isOneOf(tok::plus, tok::minus, tok::kw_OR)) {
     OperatorInfo Op;
     std::unique_ptr<Expr> Right;
@@ -681,9 +685,6 @@ bool Parser::parseSimpleExpression(std::unique_ptr<Expr> &E) {
       return _errorhandler();
     E = Actions.actOnSimpleExpression(std::move(E), std::move(Right), Op);
   }
-  if (!PrefixOp.isUnspecified())
-
-    E = Actions.actOnPrefixExpression(std::move(E), PrefixOp);
   return false;
 }
 

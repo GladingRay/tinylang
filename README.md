@@ -53,7 +53,7 @@ END GCD;
 END Gcd.
 ```
 
-More examples live in `example/`: `Gcd.mod`, `Fib.mod`, `Arrays.mod`, `TypeAlias.mod`, `Record.mod`, `Real.mod`, `Shapes.mod`, `ReturnRecord.mod`, `ReturnArray.mod`, and `VarParam.mod`, each with a matching `call*.c` harness.
+More examples live in `example/`: `Gcd.mod`, `Fib.mod`, `Arrays.mod`, `TypeAlias.mod`, `Record.mod`, `Real.mod`, `Shapes.mod`, `ReturnRecord.mod`, `ReturnArray.mod`, `VarParam.mod`, and `Expr.mod`, each with a matching `call*.c` harness.
 
 ## Current Status
 

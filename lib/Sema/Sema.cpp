@@ -667,21 +667,6 @@ Sema::actOnPrefixExpression(std::unique_ptr<Expr> E, const OperatorInfo &Op) {
                                               BooleanType.get());
   }
 
-  if (Op.getKind() == tok::minus) {
-    bool Ambiguous = true;
-    if (isa<IntegerLiteral>(E.get()) || isa<RealLiteral>(E.get()) ||
-        isa<VariableAccess>(E.get()) || isa<ConstantAccess>(E.get()))
-      Ambiguous = false;
-    else if (auto *Infix = dyn_cast<InfixExpression>(E.get())) {
-      tok::TokenKind Kind = Infix->getOperatorInfo().getKind();
-      if (Kind == tok::star || Kind == tok::slash)
-        Ambiguous = false;
-    }
-    if (Ambiguous) {
-      Diags.report(Op.getLocation(), diag::warn_ambigous_negation);
-    }
-  }
-
   TypeDeclaration *Ty = E->getType();
   bool IsConst = E->isConst();
   return std::make_unique<PrefixExpression>(std::move(E), Op, Ty, IsConst);
