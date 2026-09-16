@@ -96,6 +96,7 @@ tinylang/
 │   └── astdump/ASTDump.cpp # `tinylang-astdump` 可执行文件
 ├── test/         # 诊断回归测试
 ├── example/      # 示例程序与 C 验证程序
+├── docs/         # 贡献指南与设计与实现说明
 └── cmake/        # CMake 辅助模块
 ```
 
@@ -155,6 +156,8 @@ cc /tmp/Record.o /tmp/callrecord.o -o /tmp/callrecord
 `Gcd`、`Fib`、`Arrays`、`TypeAlias`、`Real` 的 `call*.c` 验证程序采用同样的流程。
 
 ## 设计要点
+
+想按流水线顺序（词法 → 语法 → 语义 → 代码生成，含 SSA 构造与 record 继承模型）通读实现细节，见 [`docs/design.md`](docs/design.md)。
 
 - **`.def` 文件驱动的表驱动模式**：`TokenKinds.def` 与 `Diagnostic.def` 通过宏展开被多次包含，分别生成枚举、名称表、拼写表与诊断消息表。
 - **诊断引擎**：`DiagnosticsEngine` 封装 `llvm::SourceMgr`，携带源码位置（`SMLoc`）与错误计数，支持格式化消息。

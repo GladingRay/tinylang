@@ -96,6 +96,7 @@ tinylang/
 │   └── astdump/ASTDump.cpp # the `tinylang-astdump` executable
 ├── test/         # Diagnostic regression tests
 ├── example/      # Sample Modula-2 programs and C harnesses
+├── docs/         # Repository Guidelines and the design/implementation notes
 └── cmake/        # CMake helper modules
 ```
 
@@ -155,6 +156,8 @@ cc /tmp/Record.o /tmp/callrecord.o -o /tmp/callrecord
 The same pattern is used by the `call*.c` harnesses for `Gcd`, `Fib`, `Arrays`, `TypeAlias`, and `Real`.
 
 ## Design Notes
+
+For a chapter-by-chapter walkthrough of the pipeline (lexer → parser → Sema → code generation, including the SSA construction and the record inheritance model), see [`docs/design.md`](docs/design.md).
 
 - **Table-driven `.def` files**: `TokenKinds.def` and `Diagnostic.def` are included multiple times with different macros to generate enums, name tables, spelling tables, and diagnostic tables.
 - **Diagnostics engine**: `DiagnosticsEngine` wraps `llvm::SourceMgr`, tracks source locations (`SMLoc`) and an error count, and supports formatted messages.
